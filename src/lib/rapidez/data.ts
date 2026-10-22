@@ -28,6 +28,8 @@ export interface DriverProfile {
   elite: boolean;
 }
 
+export const MODELS = ["Bera SBR 150", "Keeway Arsen II", "Empire Horse 150"] as const;
+
 export const BANKS: Bank[] = [
   { code: "0102", name: "Banco de Venezuela" },
   { code: "0108", name: "Banco Provincial" },
@@ -74,7 +76,7 @@ export const PLACES: Place[] = [
   },
   {
     id: "hospital",
-    name: "Hospital de Carora",
+    name: "Hospital Dr. Pastor Oropeza",
     hint: "frente a emergencias",
     lat: 10.1766,
     lng: -70.0832,

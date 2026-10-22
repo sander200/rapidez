@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ConnectorType } from "@/lib/app-data";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
+import { BANKS, MODELS } from "@/lib/rapidez/data";
 import { COMMISSION, OFFER_MS, SEARCH_RADIUS_M, fareFor, haversine, type LatLng } from "@/lib/rapidez/geo";
 
 const REVIEW_KEY = "Carora2026";
@@ -16,11 +17,12 @@ export interface Profile {
   fullName: string;
   phone: string;
   cedula: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "blocked";
   elite: boolean;
   plate: string;
   model: string;
   bankPhone: string;
+  bankName: string;
   rejectNote: string;
   hasCedulaPhoto: boolean;
   hasSelfie: boolean;
@@ -65,6 +67,10 @@ export interface TripView {
   offerUntil: number | null;
   commissionUsd: number;
   panicked: boolean;
+  startedAt: string | null;
+  riddenM: number;
+  driverBank: string;
+  driverBankPhone: string;
 }
 
 export interface PendingRate {
@@ -93,6 +99,7 @@ interface ProfileRow {
   plate: string | null;
   model: string | null;
   bank_phone: string | null;
+  bank_name: string | null;
   reject_note: string | null;
   cedula_photo: string | null;
   selfie: string | null;
@@ -108,11 +115,15 @@ function profileOf(row: ProfileRow): Profile {
     fullName: row.full_name,
     phone: row.phone,
     cedula: row.cedula,
-    status: row.status === "approved" || row.status === "rejected" ? row.status : "pending",
+    status:
+      row.status === "approved" || row.status === "rejected" || row.status === "blocked"
+        ? row.status
+        : "pending",
     elite: Boolean(row.elite),
     plate: row.plate ?? "",
     model: row.model ?? "",
     bankPhone: row.bank_phone ?? "",
+    bankName: row.bank_name ?? "",
     rejectNote: row.reject_note ?? "",
     hasCedulaPhoto: Boolean(row.cedula_photo),
     hasSelfie: Boolean(row.selfie),
@@ -164,6 +175,7 @@ export const submitProfile = createServerFn({ method: "POST" })
     plate: string;
     model: string;
     bankPhone: string;
+    bankName: string;
     cedulaPhoto: string;
     selfie: string;
   }) => input)
@@ -174,23 +186,28 @@ export const submitProfile = createServerFn({ method: "POST" })
     const cedula = data.cedula.trim().toUpperCase();
     if (fullName.length < 3) throw new Error("Escribe tu nombre completo.");
     if (phone.length < 10) throw new Error("El teléfono no es válido.");
-    if (!/^V-?\d{5,9}$/.test(cedula) && !/^\d{5,9}$/.test(cedula)) {
-      throw new Error("La cédula debe verse como V-12345678.");
+    if (!/^([VEJPG])-?\d{5,9}(-?\d)?$/.test(cedula)) {
+      throw new Error("La cédula o el RIF no es válido.");
     }
     const cedulaPhoto = photoOk(data.cedulaPhoto, true);
     const selfie = photoOk(data.selfie, true);
+    const model = MODELS.find((item) => item === data.model.trim()) ?? "";
+    const bank = BANKS.find((item) => item.name === data.bankName.trim());
     if (role === "driver" && data.plate.trim().length < 4) throw new Error("Falta la placa.");
+    if (role === "driver" && !model) throw new Error("Elige el modelo de la moto.");
+    if (role === "driver" && !bank) throw new Error("Elige el banco del pago móvil.");
+    if (role === "driver" && data.bankPhone.replace(/\D/g, "").length < 10) throw new Error("Falta el teléfono de pago móvil.");
     const sql = await getSql();
     const existing = await sql<{ status: string }>`select status from profiles where user_id = ${context.userId}`;
     if (existing[0]?.status === "approved") throw new Error("Esta cuenta ya está aprobada.");
     await sql`
       insert into profiles (
         user_id, role, full_name, phone, cedula, status, elite,
-        cedula_photo, selfie, plate, model, bank_phone, reject_note
+        cedula_photo, selfie, plate, model, bank_phone, bank_name, reject_note
       ) values (
         ${context.userId}, ${role}, ${fullName}, ${phone}, ${cedula}, 'pending', false,
-        ${cedulaPhoto}, ${selfie}, ${data.plate.trim().toUpperCase()}, ${data.model.trim()},
-        ${data.bankPhone.replace(/\D/g, "")}, ''
+        ${cedulaPhoto}, ${selfie}, ${data.plate.trim().toUpperCase()}, ${model},
+        ${data.bankPhone.replace(/\D/g, "")}, ${bank?.name ?? ""}, ''
       )
       on conflict (user_id) do update set
         role = excluded.role,
@@ -204,6 +221,7 @@ export const submitProfile = createServerFn({ method: "POST" })
         plate = excluded.plate,
         model = excluded.model,
         bank_phone = excluded.bank_phone,
+        bank_name = excluded.bank_name,
         reject_note = ''
     `;
     const emailed = await notifyDeveloper(
@@ -249,6 +267,18 @@ export const syncLive = createServerFn({ method: "POST" })
     }
     const lat = typeof data.lat === "number" ? data.lat : null;
     const lng = typeof data.lng === "number" ? data.lng : null;
+    if (profile.role === "driver" && lat != null && lng != null) {
+      const prev = await sql<{ lat: number; lng: number }>`select lat, lng from positions where user_id = ${context.userId}`;
+      const riding = await sql<{ id: string }>`
+        select id from trips where driver_id = ${context.userId} and status = 'riding' limit 1
+      `;
+      if (prev[0] && riding[0]) {
+        const step = haversine({ lat: Number(prev[0].lat), lng: Number(prev[0].lng) }, { lat, lng });
+        if (step >= 8 && step <= 400) {
+          await sql`update trips set ridden_m = ridden_m + ${Math.round(step)} where id = ${riding[0].id}`;
+        }
+      }
+    }
     if (lat != null && lng != null && lat > 9 && lat < 12 && lng < -69 && lng > -72) {
       const online = profile.role === "driver" ? Boolean(data.online) : true;
       await sql`
@@ -332,12 +362,21 @@ interface TripRow {
   share_token: string | null;
   commission_usd: number | null;
   panic_at: string | Date | null;
+  started_at: string | Date | null;
+  ridden_m: number | null;
 }
 
 async function tripView(row: TripRow): Promise<TripView> {
   const sql = await getSql();
-  const people = await sql<{ user_id: string; full_name: string; lat: number | null; lng: number | null }>`
-    select p.user_id, p.full_name, pos.lat, pos.lng
+  const people = await sql<{
+    user_id: string;
+    full_name: string;
+    lat: number | null;
+    lng: number | null;
+    bank_name: string | null;
+    bank_phone: string | null;
+  }>`
+    select p.user_id, p.full_name, pos.lat, pos.lng, p.bank_name, p.bank_phone
     from profiles p
     left join positions pos on pos.user_id = p.user_id
     where p.user_id = ${row.passenger_id} or p.user_id = ${row.driver_id ?? ""}
@@ -369,6 +408,10 @@ async function tripView(row: TripRow): Promise<TripView> {
     offerUntil: row.offer_until_ms == null ? null : Number(row.offer_until_ms),
     commissionUsd: Number(row.commission_usd ?? 0),
     panicked: Boolean(row.panic_at),
+    startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
+    riddenM: Number(row.ridden_m ?? 0),
+    driverBank: driver?.bank_name ?? "",
+    driverBankPhone: driver?.bank_phone ?? "",
   };
 }
 
@@ -415,7 +458,7 @@ async function candidates(pickup: LatLng, fare: number) {
     where p.role = 'driver' and p.status = 'approved' and pos.online = true
   `;
   const now = Date.now();
-  return rows
+  const fresh = rows
     .filter((row) => now - new Date(row.updated_at).getTime() < FRESH_MS)
     .map((row) => {
       const count = Number(row.rating_count) || 0;
@@ -427,13 +470,15 @@ async function candidates(pickup: LatLng, fare: number) {
         saldo: Number(row.saldo_usd),
       };
     })
-    .filter((row) => row.meters <= SEARCH_RADIUS_M && row.saldo + 0.001 >= need)
-    .sort((a, b) => {
-      const ap = a.rated && a.rating >= 4.5 ? 0 : 1;
-      const bp = b.rated && b.rating >= 4.5 ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      return a.meters - b.meters;
-    });
+    .filter((row) => row.saldo + 0.001 >= need);
+  const near = fresh.filter((row) => row.meters <= SEARCH_RADIUS_M);
+  const pool = near.length > 0 ? near : fresh;
+  return pool.sort((a, b) => {
+    const ap = a.rated && a.rating >= 4.5 ? 0 : 1;
+    const bp = b.rated && b.rating >= 4.5 ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return a.meters - b.meters;
+  });
 }
 
 async function cascadeOffers() {
@@ -522,6 +567,8 @@ export const requestTrip = createServerFn({ method: "POST" })
     if (busy[0]) throw new Error("Ya tienes una carrera abierta.");
     const pickup = { lat: data.pickupLat, lng: data.pickupLng };
     const dest = { lat: data.destLat, lng: data.destLng };
+    const destRef = data.destRef.trim();
+    if (destRef.length < 3) throw new Error("Escribe el punto de referencia del destino.");
     const distanceM = Math.round(haversine(pickup, dest));
     if (distanceM < 120) throw new Error("El destino está demasiado cerca.");
     const ref = data.pickupRef.trim() || "Donde estoy";
@@ -535,7 +582,7 @@ export const requestTrip = createServerFn({ method: "POST" })
         fare_usd, distance_m, pay_method, share_token
       ) values (
         ${id}, ${context.userId}, ${data.preferredDriverId}, 'open',
-        ${pickup.lat}, ${pickup.lng}, ${ref}, ${dest.lat}, ${dest.lng}, ${data.destRef.trim() || "Destino"},
+        ${pickup.lat}, ${pickup.lng}, ${ref}, ${dest.lat}, ${dest.lng}, ${destRef},
         ${fareFor(distanceM)}, ${distanceM}, ${pay}, ${share}
       )
     `;
@@ -609,6 +656,10 @@ export const setTripStatus = createServerFn({ method: "POST" })
           when ${payRef} <> '' then 'VERIFYING'
           else pay_status
         end,
+        started_at = case
+          when ${data.status} = 'riding' and started_at is null then now()
+          else started_at
+        end,
         updated_at = now()
       where id = ${data.tripId}
     `;
@@ -657,7 +708,10 @@ export const reviewDecide = createServerFn({ method: "POST" })
     const sql = await getSql();
     if (data.approve) {
       await sql`
-        update profiles set status = 'approved', elite = ${Boolean(data.elite)}, reject_note = ''
+        update profiles set
+          status = 'approved',
+          elite = case when role = 'driver' then true else ${Boolean(data.elite)} end,
+          reject_note = ''
         where user_id = ${data.userId} and status = 'pending'
       `;
     } else {
@@ -665,6 +719,106 @@ export const reviewDecide = createServerFn({ method: "POST" })
         update profiles set status = 'rejected', elite = false, reject_note = ${data.note.trim().slice(0, 180)}
         where user_id = ${data.userId} and status = 'pending'
       `;
+    }
+    return { ok: true };
+  });
+
+export interface ChatLine {
+  id: string;
+  body: string;
+  mine: boolean;
+}
+
+export const listChat = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { tripId: string }) => input)
+  .handler(async ({ context, data }): Promise<ChatLine[]> => {
+    const sql = await getSql();
+    const trip = await sql<{ id: string }>`
+      select id from trips
+      where id = ${data.tripId}
+        and status in ('accepted', 'arrived', 'riding', 'pay')
+        and (passenger_id = ${context.userId} or driver_id = ${context.userId})
+    `;
+    if (!trip[0]) return [];
+    const rows = await sql<{ id: string; from_user: string; body: string }>`
+      select id, from_user, body from messages where trip_id = ${data.tripId} order by created_at asc limit 40
+    `;
+    return rows.map((row) => ({ id: row.id, body: row.body, mine: row.from_user === context.userId }));
+  });
+
+export const sendChat = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { tripId: string; body: string }) => input)
+  .handler(async ({ context, data }) => {
+    const body = data.body.trim().slice(0, 140);
+    if (body.length < 1) throw new Error("Escribe el mensaje.");
+    const sql = await getSql();
+    const trip = await sql<{ id: string }>`
+      select id from trips
+      where id = ${data.tripId}
+        and status in ('accepted', 'arrived', 'riding')
+        and (passenger_id = ${context.userId} or driver_id = ${context.userId})
+    `;
+    if (!trip[0]) throw new Error("Esa carrera no tiene chat.");
+    await sql`
+      insert into messages (id, trip_id, from_user, body)
+      values (${`m_${crypto.randomUUID()}`}, ${data.tripId}, ${context.userId}, ${body})
+    `;
+    return { ok: true };
+  });
+
+export interface FleetDriver {
+  userId: string;
+  fullName: string;
+  cedula: string;
+  plate: string;
+  model: string;
+  status: "approved" | "blocked";
+}
+
+export const fleetList = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { key: string }) => input)
+  .handler(async ({ data }): Promise<FleetDriver[]> => {
+    assertReview(data.key);
+    const sql = await getSql();
+    const rows = await sql<{
+      user_id: string;
+      full_name: string;
+      cedula: string;
+      plate: string | null;
+      model: string | null;
+      status: string;
+    }>`
+      select user_id, full_name, cedula, plate, model, status
+      from profiles
+      where role = 'driver' and status in ('approved', 'blocked')
+      order by full_name asc
+    `;
+    return rows.map((row) => ({
+      userId: row.user_id,
+      fullName: row.full_name,
+      cedula: row.cedula,
+      plate: row.plate ?? "",
+      model: row.model ?? "",
+      status: row.status === "blocked" ? "blocked" : "approved",
+    }));
+  });
+
+export const setFleetState = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { key: string; userId: string; status: "approved" | "blocked" }) => input)
+  .handler(async ({ data }) => {
+    assertReview(data.key);
+    const next = data.status === "blocked" ? "blocked" : "approved";
+    const sql = await getSql();
+    await sql`
+      update profiles set status = ${next}
+      where user_id = ${data.userId} and role = 'driver' and status in ('approved', 'blocked')
+    `;
+    if (next === "blocked") {
+      await sql`update positions set online = false, updated_at = now() where user_id = ${data.userId}`;
     }
     return { ok: true };
   });
@@ -794,10 +948,24 @@ export interface WeekItem {
   commission: number;
 }
 
+export interface AuditTrip {
+  id: string;
+  dest: string;
+  fareUsd: number;
+  status: string;
+  when: string;
+}
+
+export interface OpsMetrics {
+  done: number;
+  cancelled: number;
+  open: number;
+}
+
 export const opsBoard = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { key: string }) => input)
-  .handler(async ({ data }): Promise<{ panics: PanicItem[]; week: WeekItem[] }> => {
+  .handler(async ({ data }): Promise<{ panics: PanicItem[]; week: WeekItem[]; metrics: OpsMetrics; trips: AuditTrip[] }> => {
     assertReview(data.key);
     const sql = await getSql();
     const panics = await sql<{ id: string; full_name: string; phone: string; pickup_ref: string; dest_ref: string | null }>`
@@ -817,6 +985,21 @@ export const opsBoard = createServerFn({ method: "POST" })
       where p.role = 'driver' and p.status = 'approved'
       order by p.full_name
     `;
+    const counts = await sql<{ done: number; cancelled: number; open: number }>`
+      select
+        count(*) filter (where status = 'done')::int as done,
+        count(*) filter (where status = 'cancelled')::int as cancelled,
+        count(*) filter (where status = 'open')::int as open
+      from trips
+    `;
+    const recent = await sql<{ id: string; dest_ref: string | null; fare_usd: number; status: string; updated_at: string | Date }>`
+      select id, dest_ref, fare_usd, status, updated_at
+      from trips
+      where status in ('done', 'cancelled', 'open', 'accepted', 'riding')
+      order by updated_at desc
+      limit 8
+    `;
+    const tally = counts[0];
     return {
       panics: panics.map((row) => ({
         id: row.id,
@@ -830,6 +1013,23 @@ export const opsBoard = createServerFn({ method: "POST" })
         cedula: row.cedula,
         saldo: Number(row.saldo_usd),
         commission: Number(row.week_usd),
+      })),
+      metrics: {
+        done: Number(tally?.done ?? 0),
+        cancelled: Number(tally?.cancelled ?? 0),
+        open: Number(tally?.open ?? 0),
+      },
+      trips: recent.map((row) => ({
+        id: row.id,
+        dest: row.dest_ref || "Carora",
+        fareUsd: Number(row.fare_usd),
+        status: row.status,
+        when: new Date(row.updated_at).toLocaleString("es-VE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          day: "2-digit",
+          month: "short",
+        }),
       })),
     };
   });

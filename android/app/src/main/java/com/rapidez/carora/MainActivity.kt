@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
@@ -67,11 +68,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         empty.visibility = View.GONE
-        permissions.launch(arrayOf(
+        val wanted = mutableListOf(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
             android.Manifest.permission.CAMERA,
-        ))
+        )
+        if (Build.VERSION.SDK_INT >= 33) {
+            wanted.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissions.launch(wanted.toTypedArray())
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -80,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.settings.allowFileAccess = true
         webView.settings.javaScriptCanOpenWindowsAutomatically = true
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

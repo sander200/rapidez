@@ -5,24 +5,32 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthPanel } from "@/components/rapidez/AuthPanel";
 import { MapCanvas } from "@/components/rapidez/MapCanvas";
 import { beepOffer } from "@/lib/rapidez/audio";
-import { PLACES, placeLabel, type Place } from "@/lib/rapidez/data";
-import { COMMISSION, OFFER_MS, buildRoute, fareFor, formatKm, formatUsd, formatVes, haversine, vesOf } from "@/lib/rapidez/geo";
+import { PLACES, BANKS, MODELS, placeLabel, type Place } from "@/lib/rapidez/data";
+import { COMMISSION, OFFER_MS, buildRoute, etaMin, fareFor, formatKm, formatUsd, formatVes, haversine, vesOf } from "@/lib/rapidez/geo";
 import {
   acceptTrip,
   declineTrip,
+  fleetList,
+  listChat,
   raisePanic,
   rateTrip,
   requestTrip,
   reviewDecide,
   reviewList,
   opsBoard,
+  sendChat,
+  setFleetState,
   setTripStatus,
   submitProfile,
   syncLive,
   topUp,
   tripHistory,
+  type ChatLine,
+  type FleetDriver,
   type HistoryItem,
   type NearbyMoto,
+  type OpsMetrics,
+  type AuditTrip,
   type PendingRate,
   type PanicItem,
   type Profile,
@@ -46,6 +54,18 @@ function messageOf(err: unknown) {
   return err instanceof Error ? err.message : "No se pudo completar.";
 }
 
+async function pingOffer(place: string) {
+  useRapidez.setState({ pushText: place });
+  if (typeof Notification === "undefined") return;
+  try {
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== "granted") return;
+    new Notification("Rapidez Carora", { body: `Carrera cerca: ${place}`, tag: "rapidez-offer" });
+  } catch {
+    /* el navegador no mostró el aviso */
+  }
+}
+
 async function shrink(file: File) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 640 / Math.max(bitmap.width, bitmap.height));
@@ -67,7 +87,7 @@ export function LiveApp() {
   return (
     <div className="phone">
       <MapCanvas />
-      <header className="absolute top-3 right-3 left-3 z-20 flex items-center gap-2">
+      <header className="top-bar absolute right-3 left-3 z-20 flex items-center gap-2">
         <div className="flex h-11 items-center rounded-full bg-paper px-3 shadow-lg">
           <span className="font-display text-base font-extrabold tracking-wide text-ink">RAPIDEZ</span>
         </div>
@@ -199,6 +219,7 @@ function Desk({ userId }: { userId: string }) {
             : null;
         useRapidez.setState({
           useLive: true,
+          profileStatus: result.profile?.status ?? null,
           fleet,
           pickup: active ? { lat: active.pickupLat, lng: active.pickupLng } : null,
           dest: active ? { lat: active.destLat, lng: active.destLng } : held?.dest ?? null,
@@ -210,6 +231,7 @@ function Desk({ userId }: { userId: string }) {
         if (result.offer && `${result.offer.id}:${result.offer.offerUntil}` !== seenOffer.current) {
           seenOffer.current = `${result.offer.id}:${result.offer.offerUntil}`;
           beepOffer();
+          void pingOffer(result.offer.pickupRef);
         }
         if (!result.offer) seenOffer.current = "";
       } catch (err) {
@@ -246,12 +268,14 @@ function Desk({ userId }: { userId: string }) {
     return (
       <div className="flex flex-col gap-3">
         <h1 className="font-display text-3xl font-extrabold">
-          {profile.status === "rejected" ? "Hay que corregir" : "En revisión"}
+          {profile.status === "rejected" ? "Hay que corregir" : profile.status === "blocked" ? "Unidad bloqueada" : "En revisión"}
         </h1>
         <p className="text-sm text-muted">
           {profile.status === "rejected"
             ? profile.rejectNote || "El desarrollador no aprobó esta identidad."
-            : "Cédula y selfie quedaron en la bandeja del desarrollador. Cuando apruebe, este teléfono queda vinculado."}
+            : profile.status === "blocked"
+              ? "El administrador bloqueó esta unidad. No aparece en el mapa."
+              : "Cédula y selfie quedaron en la bandeja del desarrollador. Cuando apruebe, este teléfono queda vinculado."}
         </p>
         <p className="text-sm font-semibold">{profile.fullName} · {profile.cedula}</p>
         <button type="button" className="h-12 rounded-full bg-ink text-sm font-semibold text-paper" onClick={() => setReview(true)}>
@@ -298,7 +322,7 @@ function Desk({ userId }: { userId: string }) {
         trip={trip}
         error={error}
         onQuote={onQuote}
-        onRequest={async (place, pay) => {
+        onRequest={async (place, pay, point) => {
         const here = pos.current ?? useRapidez.getState().center;
         setError("");
         try {
@@ -309,7 +333,7 @@ function Desk({ userId }: { userId: string }) {
               pickupRef: placeLabel(here),
               destLat: place.lat,
               destLng: place.lng,
-              destRef: place.name,
+              destRef: `${place.name}. ${point.trim()}`,
               payMethod: pay,
               preferredDriverId: null,
             },
@@ -347,8 +371,9 @@ function Cadastro({ onDone, onReview }: { onDone: () => void; onReview: () => vo
   const [phone, setPhone] = useState("");
   const [cedula, setCedula] = useState("");
   const [plate, setPlate] = useState("");
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState<string>(MODELS[0]);
   const [bankPhone, setBankPhone] = useState("");
+  const [bankName, setBankName] = useState<string>(BANKS[0].name);
   const [cedulaPhoto, setCedulaPhoto] = useState("");
   const [selfie, setSelfie] = useState("");
   const [error, setError] = useState("");
@@ -378,7 +403,16 @@ function Cadastro({ onDone, onReview }: { onDone: () => void; onReview: () => vo
       {role === "driver" && (
         <>
           <input className="field" placeholder="Placa" value={plate} onChange={(e) => setPlate(e.target.value)} />
-          <input className="field" placeholder="Moto" value={model} onChange={(e) => setModel(e.target.value)} />
+          <select className="field" aria-label="Moto" value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <select className="field" aria-label="Banco" value={bankName} onChange={(e) => setBankName(e.target.value)}>
+            {BANKS.map((item) => (
+              <option key={item.code} value={item.name}>{item.name}</option>
+            ))}
+          </select>
           <input className="field" placeholder="Teléfono Pago Móvil" value={bankPhone} onChange={(e) => setBankPhone(e.target.value)} />
         </>
       )}
@@ -392,7 +426,7 @@ function Cadastro({ onDone, onReview }: { onDone: () => void; onReview: () => vo
         onClick={() => {
           setPending(true);
           void submitProfile({
-            data: { role, fullName, phone, cedula, plate, model, bankPhone, cedulaPhoto, selfie },
+            data: { role, fullName, phone, cedula, plate, model: role === "driver" ? model : "", bankPhone, bankName: role === "driver" ? bankName : "", cedulaPhoto, selfie },
           })
             .then(() => onDone())
             .catch((err) => setError(messageOf(err)))
@@ -444,12 +478,13 @@ function PassengerDesk({
   trip: TripView | null;
   error: string;
   onQuote: (place: Place | null) => void;
-  onRequest: (place: Place, pay: string) => Promise<void>;
+  onRequest: (place: Place, pay: string, point: string) => Promise<void>;
   onCancel: () => Promise<void>;
 }) {
   const center = useRapidez((s) => s.center);
   const [placeId, setPlaceId] = useState<string | null>(null);
   const [pay, setPay] = useState("CASH_USD");
+  const [point, setPoint] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(false);
   const place = PLACES.find((item) => item.id === placeId) ?? null;
@@ -484,6 +519,13 @@ function PassengerDesk({
           </button>
         ))}
       </div>
+      <input
+        className="field"
+        aria-label="Punto de referencia del destino"
+        placeholder="Punto de referencia del destino"
+        value={point}
+        onChange={(e) => setPoint(e.target.value)}
+      />
       {place && (
         <div>
           <p className="font-display text-4xl font-extrabold tabular-nums">
@@ -522,12 +564,12 @@ function PassengerDesk({
       {error && <p className="text-sm font-medium text-signal">{error}</p>}
       <button
         type="button"
-        disabled={!place || tooClose || busy}
+        disabled={!place || tooClose || point.trim().length < 3 || busy}
         className="h-12 rounded-full bg-brand text-base font-semibold text-ink disabled:opacity-40"
         onClick={() => {
           if (!place) return;
           setBusy(true);
-          void onRequest(place, pay).finally(() => setBusy(false));
+          void onRequest(place, pay, point).finally(() => setBusy(false));
         }}
       >
         {busy ? "Enviando…" : "Pedir la más cercana"}
@@ -599,9 +641,23 @@ function TripCard({ trip, mine, onCancel }: { trip: TripView; mine: "passenger" 
         {formatUsd(trip.fareUsd)} · {formatVes(vesOf(trip.fareUsd))}
         {trip.payMethod === "CASH_USD" ? " · efectivo" : trip.payMethod === "CASH_VES" ? " · bolívares" : " · pago móvil"}
       </p>
+      {meters != null && (trip.status === "accepted" || trip.status === "arrived") && (
+        <p className="text-sm font-semibold">Llega en {etaMin(meters)} min</p>
+      )}
+      {trip.status === "riding" && <RideMeter startedAt={trip.startedAt} riddenM={trip.riddenM} />}
+      {trip.payMethod === "PAGO_MOVIL" && trip.driverBankPhone && (
+        <button
+          type="button"
+          className="h-11 rounded-full bg-paper text-sm font-semibold"
+          onClick={() => void navigator.clipboard?.writeText(`${trip.driverBank} ${trip.driverBankPhone}`)}
+        >
+          Copiar pago móvil {trip.driverBank} {trip.driverBankPhone}
+        </button>
+      )}
+      {["accepted", "arrived", "riding"].includes(trip.status) && <RideChat tripId={trip.id} />}
       {panicNote && <p className="rounded-2xl bg-signal px-3 py-2 text-sm font-semibold text-paper">{panicNote}</p>}
       {mine === "driver" && trip.status === "accepted" && (
-        <button type="button" className="h-12 rounded-full bg-brand font-semibold" onClick={() => void setTripStatus({ data: { tripId: trip.id, status: "arrived" } })}>Ya llegué</button>
+        <button type="button" className="h-12 rounded-full bg-brand font-semibold" onClick={() => void setTripStatus({ data: { tripId: trip.id, status: "arrived" } })}>Ya llegué al punto</button>
       )}
       {mine === "driver" && trip.status === "arrived" && (
         <button type="button" className="h-12 rounded-full bg-brand font-semibold" onClick={() => void setTripStatus({ data: { tripId: trip.id, status: "riding" } })}>Iniciar viaje</button>
@@ -715,6 +771,72 @@ function RateCard({ item }: { item: PendingRate }) {
       >
         {sent ? "Listo" : `Enviar ${stars} de 5`}
       </button>
+    </div>
+  );
+}
+
+function RideMeter({ startedAt, riddenM }: { startedAt: string | null; riddenM: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = startedAt ? Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000)) : 0;
+  const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  return (
+    <p className="font-display text-2xl font-extrabold tabular-nums">
+      {clock} · {formatKm(riddenM)}
+    </p>
+  );
+}
+
+function RideChat({ tripId }: { tripId: string }) {
+  const [lines, setLines] = useState<ChatLine[]>([]);
+  const [text, setText] = useState("");
+  const presets = ["Ya voy en la puerta", "Estoy en el punto", "Llego en un minuto"];
+
+  async function load() {
+    try {
+      setLines(await listChat({ data: { tripId } }));
+    } catch {
+      /* el siguiente intento vuelve a leer */
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => void load(), 2500);
+    return () => clearInterval(id);
+  }, [tripId]);
+
+  async function send(body: string) {
+    const clean = body.trim();
+    if (!clean) return;
+    await sendChat({ data: { tripId, body: clean } });
+    setText("");
+    await load();
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        {presets.map((item) => (
+          <button key={item} type="button" className="rounded-full bg-paper px-3 py-2 text-xs font-semibold" onClick={() => void send(item)}>
+            {item}
+          </button>
+        ))}
+      </div>
+      {lines.map((line) => (
+        <p key={line.id} className={line.mine ? "text-sm font-semibold" : "text-sm text-muted"}>
+          {line.body}
+        </p>
+      ))}
+      <div className="flex gap-2">
+        <input className="field" aria-label="Mensaje" placeholder="Mensaje" value={text} onChange={(e) => setText(e.target.value)} />
+        <button type="button" className="h-11 rounded-full bg-ink px-4 text-sm font-semibold text-paper" onClick={() => void send(text)}>
+          Enviar
+        </button>
+      </div>
     </div>
   );
 }
@@ -855,7 +977,7 @@ function DriverDesk({
       {error && <p className="text-sm font-medium text-signal">{error}</p>}
       {offer && <OfferPanel offer={offer} />}
       <button type="button" className="h-11 text-sm font-semibold text-muted" onClick={() => setHistory(true)}>Carreras hechas</button>
-      <button type="button" className="h-11 text-sm font-semibold text-muted" onClick={onReview}>Bandeja del desarrollador</button>
+      <button type="button" className="h-11 text-sm font-semibold text-muted" onClick={onReview}>Gestión</button>
     </div>
   );
 }
@@ -868,6 +990,9 @@ function Review({ onClose }: { onClose: () => void }) {
   const [note, setNote] = useState("");
   const [panics, setPanics] = useState<PanicItem[]>([]);
   const [week, setWeek] = useState<WeekItem[]>([]);
+  const [fleet, setFleet] = useState<FleetDriver[]>([]);
+  const [metrics, setMetrics] = useState<OpsMetrics | null>(null);
+  const [audit, setAudit] = useState<AuditTrip[]>([]);
 
   async function load(next = key) {
     setError("");
@@ -876,6 +1001,9 @@ function Review({ onClose }: { onClose: () => void }) {
       const board = await opsBoard({ data: { key: next } });
       setPanics(board.panics);
       setWeek(board.week);
+      setFleet(await fleetList({ data: { key: next } }));
+      setMetrics(board.metrics);
+      setAudit(board.trips);
     } catch (err) {
       setItems(null);
       setError(messageOf(err));
@@ -884,7 +1012,7 @@ function Review({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="font-display text-3xl font-extrabold">Bandeja</h1>
+      <h1 className="font-display text-3xl font-extrabold">Gestión</h1>
       <p className="text-sm text-muted">Cédula y selfie, pasajero o mototaxista. Al aprobar, esa persona entra y queda en un solo teléfono.</p>
       <input className="field" placeholder="Clave de revisión" value={key} onChange={(e) => setKey(e.target.value)} />
       <button type="button" className="h-12 rounded-full bg-ink font-semibold text-paper" onClick={() => void load()}>Abrir pendientes</button>
@@ -896,6 +1024,30 @@ function Review({ onClose }: { onClose: () => void }) {
           {panics.map((item) => (
             <p key={item.id} className="mt-1 text-sm">
               {item.who} · {item.phone} · {item.pickup} → {item.dest}
+            </p>
+          ))}
+        </div>
+      )}
+      {metrics && (
+        <div className="rounded-2xl bg-paper p-3">
+          <p className="text-sm font-semibold">Corridas</p>
+          <p className="mt-1 text-sm">
+            {metrics.done} listas · {metrics.cancelled} canceladas · {metrics.open} en oferta
+          </p>
+          <p className="text-sm text-muted">
+            {metrics.done + metrics.cancelled === 0
+              ? "Todavía no hay carreras cerradas."
+              : `Efectividad ${Math.round((metrics.done / (metrics.done + metrics.cancelled)) * 100)}%`}
+          </p>
+          <p className="text-sm text-muted">Si no hay moto en 2.5 km, se ofrece a la más cercana en línea.</p>
+        </div>
+      )}
+      {audit.length > 0 && (
+        <div className="rounded-2xl bg-paper p-3">
+          <p className="text-sm font-semibold">Historial</p>
+          {audit.map((item) => (
+            <p key={item.id} className="mt-1 text-sm">
+              {item.when} · {item.dest} · {formatUsd(item.fareUsd)} · {formatVes(vesOf(item.fareUsd))} · {item.status}
             </p>
           ))}
         </div>
@@ -920,11 +1072,36 @@ function Review({ onClose }: { onClose: () => void }) {
             {item.selfie && <img src={item.selfie} alt="Selfie" className="h-28 w-full rounded-xl object-cover" />}
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" className="h-11 rounded-full bg-brand text-sm font-semibold" onClick={() => void reviewDecide({ data: { key, userId: item.userId, approve: true, elite: item.role === "driver", note: "" } }).then(() => load())}>Aprobar</button>
+            <button type="button" className="h-11 rounded-full bg-brand text-sm font-semibold" onClick={() => void reviewDecide({ data: { key, userId: item.userId, approve: true, elite: item.role === "driver", note: "" } }).then(() => load())}>
+              {item.role === "driver" ? "Aprobar y dar sello" : "Aprobar"}
+            </button>
             <button type="button" className="h-11 rounded-full bg-signal text-sm font-semibold text-paper" onClick={() => void reviewDecide({ data: { key, userId: item.userId, approve: false, elite: false, note: "La foto no coincide con la cédula." } }).then(() => load())}>Rechazar</button>
           </div>
         </article>
       ))}
+      {fleet.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-semibold">Flota</p>
+          {fleet.map((item) => (
+            <div key={item.userId} className="flex items-center justify-between gap-2 rounded-2xl bg-paper p-3">
+              <p className="text-sm">
+                {item.fullName} · {item.plate} · {item.status === "blocked" ? "bloqueado" : "sello catastrado"}
+              </p>
+              <button
+                type="button"
+                className="h-9 rounded-full bg-ink px-3 text-xs font-semibold text-paper"
+                onClick={() =>
+                  void setFleetState({
+                    data: { key, userId: item.userId, status: item.status === "blocked" ? "approved" : "blocked" },
+                  }).then(() => load())
+                }
+              >
+                {item.status === "blocked" ? "Reactivar" : "Bloquear"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="mt-1 flex flex-col gap-2 rounded-2xl border border-line p-3">
         <p className="text-sm font-semibold">Recargar saldo de comisión</p>
         <p className="text-sm text-muted">Suma $5 al mototaxista aprobado con esta cédula.</p>

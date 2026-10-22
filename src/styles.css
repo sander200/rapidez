@@ -23,6 +23,8 @@
     background: var(--color-ink);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -71,6 +73,11 @@
   background: var(--color-sheet);
   color: var(--color-ink);
   box-shadow: 0 -12px 40px rgb(26 28 20 / 0.16);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.top-bar {
+  top: max(0.75rem, env(safe-area-inset-top));
 }
 
 .sheet-in {
@@ -93,8 +100,8 @@
 
 .zoom-stack {
   position: absolute;
-  top: 4.25rem;
-  right: 0.75rem;
+  top: calc(4.25rem + env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
   z-index: 20;
   display: flex;
   flex-direction: column;

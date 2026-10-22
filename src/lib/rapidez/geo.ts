@@ -5,7 +5,7 @@ export interface LatLng {
 
 export const RATE_VES = 46.85;
 export const SEARCH_RADIUS_M = 2500;
-export const OFFER_MS = 18000;
+export const OFFER_MS = 15000;
 export const COMMISSION = 0.1;
 export const PROXIMITY_M = 100;
 export const ARRIVE_M = 48;
@@ -37,6 +37,11 @@ export function formatUsd(n: number): string {
 
 export function formatVes(n: number): string {
   return `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export function etaMin(meters: number): number {
+  const minutes = meters / (22000 / 60);
+  return Math.max(1, Math.round(minutes));
 }
 
 export function formatKm(meters: number): string {

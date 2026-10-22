@@ -1,11 +1,10 @@
-# Rapidez para Android Studio
+# Rapidez para Android
 
-Este projeto abre o Rapidez real no telemóvel. Não tem motos nem corridas de teste.
+A app do telemóvel abre o Rapidez real. A mesma conta serve para passageiro e mototaxista. Não há motos de teste.
 
-1. Publica o site do Rapidez e copia o endereço https.
+1. Publica o site e copia o endereço https.
 2. Copia `local.properties.example` para `local.properties`.
-3. Escreve `rapidez.url=https://o-teu-endereco` e confirma `sdk.dir`.
-4. No Android Studio: Open e escolhe esta pasta.
-5. Run. O GPS, a câmara da cédula e o som do alerta ficam ativos.
+3. Escreve `rapidez.url=https://o-teu-endereco`.
+4. No Android Studio, abre esta pasta e carrega em Run.
 
-`local.properties` não entra no Git.
+O GPS, a câmara da cédula e o alerta funcionam com a app aberta. O iPhone está na pasta `ios`, no mesmo repositório.

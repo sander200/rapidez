@@ -4,7 +4,10 @@ import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 export function AuthPanel() {
   const [mode, setMode] = useState<"in" | "up">("up");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem("rapidez-email") ?? "";
+  });
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -21,6 +24,7 @@ export function AuthPanel() {
           callbackURL: "/",
         });
         if (result.error) setError(result.error.message ?? "No se pudo crear la cuenta.");
+        else localStorage.setItem("rapidez-email", email.trim());
       } else {
         const result = await authClient.signIn.email({
           email: email.trim(),
@@ -28,6 +32,7 @@ export function AuthPanel() {
           callbackURL: "/",
         });
         if (result.error) setError(result.error.message ?? "Correo o clave incorrectos.");
+        else localStorage.setItem("rapidez-email", email.trim());
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo entrar.");

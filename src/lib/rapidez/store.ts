@@ -69,6 +69,8 @@ interface RapidezState {
   actingId: string;
   offerCooldown: number;
   useLive: boolean;
+  profileStatus: "pending" | "approved" | "rejected" | "blocked" | null;
+  pushText: string;
   fleet: { id: string; name: string; lat: number; lng: number; elite: boolean }[];
   payout: Payout;
   mapSeq: number;
@@ -146,6 +148,8 @@ export const useRapidez = create<RapidezState>((set, get) => ({
   actingId: "you",
   offerCooldown: 0,
   useLive: false,
+  profileStatus: null,
+  pushText: "",
   fleet: [],
   center: HOME,
   pickupRef: "",
