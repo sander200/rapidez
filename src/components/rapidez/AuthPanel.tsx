@@ -2,7 +2,7 @@ import { useState } from "react";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 
 export function AuthPanel() {
-  const [mode, setMode] = useState<"in" | "up">("up");
+  const [mode, setMode] = useState<"in" | "up">("in");
   const [name, setName] = useState("");
   const [email, setEmail] = useState(() => {
     if (typeof localStorage === "undefined") return "";

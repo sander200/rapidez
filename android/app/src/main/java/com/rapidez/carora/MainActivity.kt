@@ -15,7 +15,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.TextView
+import android.widget.Button
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,8 +53,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.web)
-        val empty = findViewById<TextView>(R.id.empty)
-        val url = BuildConfig.RAPIDEZ_URL.trim()
+        val gate = findViewById<View>(R.id.gate)
+        val urlField = findViewById<EditText>(R.id.url)
+        val open = findViewById<Button>(R.id.open)
+        val prefs = getSharedPreferences("rapidez", MODE_PRIVATE)
+        val baked = BuildConfig.RAPIDEZ_URL.trim()
+        val saved = prefs.getString("url", "")?.trim().orEmpty()
+        val initial = if (baked.startsWith("http://") || baked.startsWith("https://")) baked else saved
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -61,13 +67,28 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            webView.visibility = View.GONE
-            empty.visibility = View.VISIBLE
-            return
+        fun show(address: String) {
+            if (!address.startsWith("http://") && !address.startsWith("https://")) {
+                webView.visibility = View.GONE
+                gate.visibility = View.VISIBLE
+                urlField.setText(address)
+                return
+            }
+            prefs.edit().putString("url", address).apply()
+            gate.visibility = View.GONE
+            webView.visibility = View.VISIBLE
+            prepareWeb()
+            if (savedInstanceState != null) webView.restoreState(savedInstanceState) else webView.loadUrl(address)
         }
 
-        empty.visibility = View.GONE
+        open.setOnClickListener { show(urlField.text.toString().trim()) }
+        if (initial.startsWith("http://") || initial.startsWith("https://")) show(initial) else show("")
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun prepareWeb() {
+        if (webView.tag == "ready") return
+        webView.tag = "ready"
         val wanted = mutableListOf(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -136,8 +157,6 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
-
-        if (savedInstanceState != null) webView.restoreState(savedInstanceState) else webView.loadUrl(url)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

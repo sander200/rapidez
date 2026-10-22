@@ -1,10 +1,16 @@
-# Rapidez para iPhone
+# Rapidez no iPhone
 
-É a mesma app do Android. Abre o site publicado, com GPS e câmara.
+Há dois caminhos. Os dois abrem a mesma app.
 
-1. Publica o site e copia o endereço https.
+## Sem App Store
+
+No Safari, abre o site publicado e escolhe **Adicionar ao ecrã principal**. Fica em ecrã inteiro, com o mapa e o login. Não precisa de Mac.
+
+## App Store
+
+1. Publica o site e copia o https.
 2. Em `Rapidez/Info.plist`, na chave `RAPIDEZ_URL`, cola esse endereço.
-3. Num Mac, abre `Rapidez.xcodeproj` no Xcode.
-4. Escolhe o teu iPhone e carrega em Run.
+3. Num Mac com Xcode, abre `Rapidez.xcodeproj`.
+4. Product > Archive, e envia com a conta Apple Developer.
 
-O GPS funciona com a app aberta. Não dá para gerar o ficheiro do iPhone neste computador: isso só o Xcode, num Mac, faz.
+Daqui não se gera o ficheiro do iPhone. O GPS e a câmara funcionam com a app aberta.

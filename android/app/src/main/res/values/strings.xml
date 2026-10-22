@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Rapidez</string>
-    <string name="missing_url">Falta o endereço. Em local.properties escreve rapidez.url com o link publicado do Rapidez e volta a compilar.</string>
+    <string name="missing_url">Cola o endereço https do Rapidez publicado. A app abre esse site, sem motos de teste.</string>
+    <string name="open_site">Abrir</string>
 </resources>

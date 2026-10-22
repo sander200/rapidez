@@ -3,3 +3,8 @@ node_modules/
 .github_repo
 .env
 .env.*
+android/local.properties
+android/keystore.properties
+android/*.jks
+android/*.keystore
+android/app/release/

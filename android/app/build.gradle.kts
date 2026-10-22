@@ -14,6 +14,12 @@ val localProps = Properties().apply {
 
 val rapidezUrl = (localProps.getProperty("rapidez.url") ?: "").replace("\\", "\\\\").replace("\"", "")
 
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.inputStream().use { keystoreProps.load(it) }
+}
+
 android {
     namespace = "com.rapidez.carora"
     compileSdk = 35
@@ -25,6 +31,17 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         buildConfigField("String", "RAPIDEZ_URL", "\"$rapidezUrl\"")
+    }
+
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildFeatures {
@@ -42,6 +59,9 @@ android {
 
     buildTypes {
         release {
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
