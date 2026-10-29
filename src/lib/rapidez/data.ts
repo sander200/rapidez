@@ -6,6 +6,7 @@ export interface Place {
   hint: string;
   lat: number;
   lng: number;
+  premiere?: boolean;
 }
 
 export interface Bank {
@@ -52,6 +53,7 @@ export const PLACES: Place[] = [
     hint: "urbanización",
     lat: 10.1742,
     lng: -70.0798,
+    premiere: true,
   },
   {
     id: "catedral",
@@ -94,6 +96,7 @@ export const PLACES: Place[] = [
     hint: "entrada principal",
     lat: 10.1702,
     lng: -70.0746,
+    premiere: true,
   },
   {
     id: "industrial",
@@ -101,10 +104,15 @@ export const PLACES: Place[] = [
     hint: "portón de la zona",
     lat: 10.1654,
     lng: -70.0678,
+    premiere: true,
   },
 ];
 
 export const HOME: LatLng = { lat: PLACES[1].lat, lng: PLACES[1].lng };
+
+export function premiereAt(point: LatLng): boolean {
+  return PLACES.some((place) => place.premiere && haversine(point, place) < 180);
+}
 
 export const NPCS: DriverProfile[] = [
   {

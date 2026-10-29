@@ -43,7 +43,8 @@ export function AuthPanel() {
 
   return (
     <div className="w-full max-w-sm rounded-3xl bg-sheet p-5 text-ink">
-      <p className="font-display text-2xl font-extrabold tracking-wide">RAPIDEZ</p>
+      <img src="/logo.jpg" alt="Rapidez Moto transporte" className="mx-auto size-28 rounded-3xl object-cover" />
+      <p className="mt-3 text-center font-display text-2xl font-extrabold tracking-wide">RAPIDEZ</p>
       <h1 className="mt-1 font-display text-3xl font-extrabold">
         {mode === "up" ? "Crear cuenta" : "Entrar"}
       </h1>

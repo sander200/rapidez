@@ -88,8 +88,9 @@ export function LiveApp() {
     <div className="phone">
       <MapCanvas />
       <header className="top-bar absolute right-3 left-3 z-20 flex items-center gap-2">
-        <div className="flex h-11 items-center rounded-full bg-paper px-3 shadow-lg">
-          <span className="font-display text-base font-extrabold tracking-wide text-ink">RAPIDEZ</span>
+        <div className="flex h-11 items-center gap-2 rounded-full bg-paper pr-3 pl-1 shadow-lg">
+          <img src="/logo.jpg" alt="Rapidez Moto transporte" className="size-9 rounded-full object-cover" />
+          <span className="font-display text-sm font-extrabold tracking-wide text-ink">RAPIDEZ</span>
         </div>
         <div className="ml-auto rounded-full bg-paper px-2 py-1 shadow-lg">
           <UserButton />
@@ -489,7 +490,7 @@ function PassengerDesk({
   const [history, setHistory] = useState(false);
   const place = PLACES.find((item) => item.id === placeId) ?? null;
   const meters = place ? haversine(center, place) : 0;
-  const fare = place ? fareFor(meters) : 0;
+  const fare = place ? fareFor(meters, Boolean(place.premiere)) : 0;
   const tooClose = Boolean(place) && meters < 120;
 
   useEffect(() => {
@@ -515,7 +516,7 @@ function PassengerDesk({
             className={item.id === placeId ? "rounded-full bg-ink px-3 py-2 text-sm font-semibold text-paper" : "rounded-full border border-line bg-paper px-3 py-2 text-sm font-medium"}
             onClick={() => setPlaceId(item.id === placeId ? null : item.id)}
           >
-            {item.name}
+            {item.name}{item.premiere ? " · $1" : ""}
           </button>
         ))}
       </div>
@@ -533,6 +534,7 @@ function PassengerDesk({
           </p>
           <p className="text-sm text-muted">
             {formatKm(meters)} hasta {place.name}
+            {place.premiere ? " · estreno del sector" : ""}
             {" · "}
             {pay === "CASH_VES" ? formatUsd(fare) : formatVes(vesOf(fare))}
           </p>

@@ -22,9 +22,11 @@ export function haversine(a: LatLng, b: LatLng): number {
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-export function fareFor(distanceM: number): number {
-  const raw = 1.2 + (distanceM / 1000) * 0.55;
-  return Math.max(2, Math.round(raw * 100) / 100);
+export const FARE_USD = 1.5;
+export const FARE_PREMIERE_USD = 1;
+
+export function fareFor(_distanceM: number, premiere = false): number {
+  return premiere ? FARE_PREMIERE_USD : FARE_USD;
 }
 
 export function vesOf(usd: number): number {

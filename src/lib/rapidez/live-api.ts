@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ConnectorType } from "@/lib/app-data";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
-import { BANKS, MODELS } from "@/lib/rapidez/data";
+import { BANKS, MODELS, premiereAt } from "@/lib/rapidez/data";
 import { COMMISSION, OFFER_MS, SEARCH_RADIUS_M, fareFor, haversine, type LatLng } from "@/lib/rapidez/geo";
 
 const REVIEW_KEY = "Carora2026";
@@ -583,7 +583,7 @@ export const requestTrip = createServerFn({ method: "POST" })
       ) values (
         ${id}, ${context.userId}, ${data.preferredDriverId}, 'open',
         ${pickup.lat}, ${pickup.lng}, ${ref}, ${dest.lat}, ${dest.lng}, ${destRef},
-        ${fareFor(distanceM)}, ${distanceM}, ${pay}, ${share}
+        ${fareFor(distanceM, premiereAt(dest))}, ${distanceM}, ${pay}, ${share}
       )
     `;
     await cascadeOffers();
