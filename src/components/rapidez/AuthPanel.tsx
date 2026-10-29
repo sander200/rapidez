@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
+import { ShieldCheck } from "lucide-react";
+import { GROK_PROVIDERS, authClient, setBearerToken, signIn } from "@/lib/auth/client";
 
 export function AuthPanel() {
-  const [mode, setMode] = useState<"in" | "up">("in");
+  const [mode, setMode] = useState<"in" | "up">("up");
   const [name, setName] = useState("");
   const [email, setEmail] = useState(() => {
     if (typeof localStorage === "undefined") return "";
@@ -12,27 +13,53 @@ export function AuthPanel() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
+  const showGrokOAuth =
+    typeof window !== "undefined" && window.location.hostname.endsWith(".grok-sandbox.com");
+
   async function submit() {
     setError("");
     setPending(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
       if (mode === "up") {
         const result = await authClient.signUp.email({
-          name: name.trim() || "Rapidez",
-          email: email.trim(),
+          name: name.trim() || "Usuario Carora",
+          email: cleanEmail,
           password,
           callbackURL: "/",
         });
-        if (result.error) setError(result.error.message ?? "No se pudo crear la cuenta.");
-        else localStorage.setItem("rapidez-email", email.trim());
+        if (result.error) {
+          const fallback = await authClient.signIn.email({
+            email: cleanEmail,
+            password,
+            callbackURL: "/",
+          });
+          if (fallback.error) {
+            setError(result.error.message ?? "No se pudo crear la cuenta.");
+            return;
+          }
+          const fbToken = (fallback.data as { token?: string } | null)?.token;
+          if (fbToken) setBearerToken(fbToken);
+        } else {
+          const upToken = (result.data as { token?: string } | null)?.token;
+          if (upToken) setBearerToken(upToken);
+        }
+        localStorage.setItem("rapidez-email", cleanEmail);
+        await authClient.getSession();
       } else {
         const result = await authClient.signIn.email({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           callbackURL: "/",
         });
-        if (result.error) setError(result.error.message ?? "Correo o clave incorrectos.");
-        else localStorage.setItem("rapidez-email", email.trim());
+        if (result.error) {
+          setError(result.error.message ?? "Correo o clave incorrectos.");
+          return;
+        }
+        const inToken = (result.data as { token?: string } | null)?.token;
+        if (inToken) setBearerToken(inToken);
+        localStorage.setItem("rapidez-email", cleanEmail);
+        await authClient.getSession();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo entrar.");
@@ -42,66 +69,95 @@ export function AuthPanel() {
   }
 
   return (
-    <div className="w-full max-w-sm rounded-3xl bg-sheet p-5 text-ink">
-      <img src="/logo.jpg" alt="Rapidez Moto transporte" className="mx-auto size-28 rounded-3xl object-cover" />
-      <p className="mt-3 text-center font-display text-2xl font-extrabold tracking-wide">RAPIDEZ</p>
-      <h1 className="mt-1 font-display text-3xl font-extrabold">
-        {mode === "up" ? "Crear cuenta" : "Entrar"}
-      </h1>
-      <p className="mt-1 text-sm text-muted">Una cuenta, un teléfono. Pasajero o mototaxista.</p>
-      {mode === "up" && (
-        <label className="mt-4 block text-sm font-semibold">
-          Nombre
-          <input className="field mt-1" value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-      )}
-      <label className="mt-3 block text-sm font-semibold">
-        Correo
-        <input
-          className="field mt-1"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+    <div className="w-full rounded-3xl bg-sheet p-2 text-ink">
+      <div className="flex items-center gap-3">
+        <img
+          src="/logo.jpg"
+          alt="Rapidez Moto transporte"
+          className="size-16 rounded-2xl object-cover shadow-md"
         />
-      </label>
-      <label className="mt-3 block text-sm font-semibold">
-        Clave
-        <input
-          className="field mt-1"
-          type="password"
-          autoComplete={mode === "up" ? "new-password" : "current-password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
-      {error && <p className="mt-2 text-sm font-medium text-signal">{error}</p>}
-      <button
-        type="button"
-        disabled={pending || password.length < 8 || !email.includes("@")}
-        onClick={() => void submit()}
-        className="mt-4 h-12 w-full rounded-full bg-brand text-base font-semibold text-ink disabled:opacity-40"
-      >
-        {pending ? "Espera…" : mode === "up" ? "Crear cuenta" : "Entrar"}
-      </button>
-      <button
-        type="button"
-        className="mt-2 h-11 w-full text-sm font-semibold text-muted"
-        onClick={() => setMode(mode === "up" ? "in" : "up")}
-      >
-        {mode === "up" ? "Ya tengo cuenta" : "Crear una cuenta"}
-      </button>
-      <div className="mt-3 flex flex-col gap-2">
-        {GROK_PROVIDERS.map((provider) => (
+        <div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand/25 px-2.5 py-0.5 text-xs font-bold text-ink">
+            <ShieldCheck className="size-3.5" /> Carora · Estado Lara
+          </span>
+          <p className="mt-0.5 font-display text-2xl font-extrabold tracking-wide">RAPIDEZ MOTO</p>
+          <p className="text-xs text-muted">
+            Transporte real verificado · Selfie y documentos obligatorios
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 border-t border-line pt-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-lg font-extrabold">
+            {mode === "up" ? "Crear cuenta real" : "Entrar con tu correo"}
+          </h2>
           <button
-            key={provider.providerId}
             type="button"
-            onClick={() => signIn(provider.providerId, { callbackURL: "/" })}
-            className="h-12 w-full rounded-full border border-line bg-paper text-sm font-semibold text-ink"
+            className="text-xs font-semibold text-muted underline"
+            onClick={() => setMode(mode === "up" ? "in" : "up")}
           >
-            Continuar con {provider.label}
+            {mode === "up" ? "Ya tengo cuenta" : "Crear cuenta"}
           </button>
-        ))}
+        </div>
+
+        {mode === "up" && (
+          <label className="mt-2 block text-xs font-semibold">
+            Nombre y apellido
+            <input
+              className="field mt-1"
+              placeholder="Ej. José Gregorio Rivas"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        )}
+        <label className="mt-2 block text-xs font-semibold">
+          Correo electrónico
+          <input
+            className="field mt-1"
+            type="email"
+            autoComplete="email"
+            placeholder="tucorreo@ejemplo.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+        <label className="mt-2 block text-xs font-semibold">
+          Clave (mínimo 8 caracteres)
+          <input
+            className="field mt-1"
+            type="password"
+            placeholder="••••••••"
+            autoComplete={mode === "up" ? "new-password" : "current-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        {error && <p className="mt-2 text-sm font-medium text-signal">{error}</p>}
+        <button
+          type="button"
+          disabled={pending || password.length < 8 || !email.includes("@")}
+          onClick={() => void submit()}
+          className="mt-3 h-11 w-full rounded-full bg-ink text-sm font-semibold text-paper disabled:opacity-40"
+        >
+          {pending ? "Procesando…" : mode === "up" ? "Continuar al registro" : "Entrar"}
+        </button>
+
+        {showGrokOAuth && (
+          <div className="mt-3 flex flex-col gap-2">
+            {GROK_PROVIDERS.map((provider) => (
+              <button
+                key={provider.providerId}
+                type="button"
+                onClick={() => void signIn(provider.providerId, { callbackURL: "/" })}
+                className="h-11 w-full rounded-full border border-line bg-paper text-sm font-semibold text-ink"
+              >
+                Continuar con {provider.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

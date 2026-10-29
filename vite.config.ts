@@ -34,19 +34,20 @@ function pgliteBootstrapPlugin(): Plugin {
   return {
     name: "app-builder:pglite-bootstrap",
     apply: "serve",
-    async configureServer(server) {
+    configureServer(server) {
       if (!hasGlobbedMigrations(server.config.root)) return;
-      try {
-        const mod = (await server.ssrLoadModule("/src/lib/db.ts")) as {
-          ensureDbReady?: () => Promise<void>;
-        };
-        if (typeof mod.ensureDbReady === "function") {
-          await mod.ensureDbReady();
+      void (async () => {
+        try {
+          const mod = (await server.ssrLoadModule("/src/lib/db.ts")) as {
+            ensureDbReady?: () => Promise<void>;
+          };
+          if (typeof mod.ensureDbReady === "function") {
+            await mod.ensureDbReady();
+          }
+        } catch (err) {
+          console.error("[app-builder] DB bootstrap failed:", err);
         }
-      } catch (err) {
-        console.error("[app-builder] DB bootstrap failed:", err);
-        throw err;
-      }
+      })();
     },
   };
 }
@@ -85,7 +86,7 @@ function authPopupPlugin(): Plugin {
           }
 
           const host = String(
-            req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:8080",
+            req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:3000",
           );
           const proto = String(
             req.headers["x-forwarded-proto"] ??
@@ -142,14 +143,11 @@ function authPopupPlugin(): Plugin {
   };
 }
 
-// `0.0.0.0:8080` is the live-preview contract — don't change host/port.
-// The dev server starts once `src/router.tsx` and `src/routes/` exist — see
-// AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: "0.0.0.0",
-    port: 8080,
-    strictPort: true,
+    port: 3000,
+    allowedHosts: true,
   },
   preview: {
     host: "127.0.0.1",

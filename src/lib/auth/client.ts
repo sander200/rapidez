@@ -25,6 +25,10 @@ export const authClient = createAuthClient({
       if (token) ctx.headers.set("Authorization", `Bearer ${token}`);
       return ctx;
     },
+    onSuccess(ctx) {
+      const authToken = ctx.response.headers.get("set-auth-token");
+      if (authToken) setBearerToken(authToken);
+    },
   },
 });
 
@@ -51,17 +55,22 @@ const BEARER_KEY = "grok-auth.bearer-token";
 export function getBearerToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.sessionStorage.getItem(BEARER_KEY);
+    return window.sessionStorage.getItem(BEARER_KEY) ?? window.localStorage.getItem(BEARER_KEY);
   } catch {
     return null;
   }
 }
 
-function setBearerToken(token: string | null): void {
+export function setBearerToken(token: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (token) window.sessionStorage.setItem(BEARER_KEY, token);
-    else window.sessionStorage.removeItem(BEARER_KEY);
+    if (token) {
+      window.sessionStorage.setItem(BEARER_KEY, token);
+      window.localStorage.setItem(BEARER_KEY, token);
+    } else {
+      window.sessionStorage.removeItem(BEARER_KEY);
+      window.localStorage.removeItem(BEARER_KEY);
+    }
   } catch {
     /* storage unavailable — ignore */
   }
@@ -69,13 +78,14 @@ function setBearerToken(token: string | null): void {
 
 /**
  * The sandbox live preview runs this app inside an iframe on a `*.grok-sandbox.com`
- * host, where a full-page redirect to the broker can't work — so sign-in uses a
- * popup there and a normal redirect everywhere else.
+ * or `*.run.app` host, where a full-page redirect to the broker can't work.
  */
 function inLivePreview(): boolean {
   return (
     typeof window !== "undefined" &&
-    window.location.hostname.endsWith(".grok-sandbox.com")
+    (window.location.hostname.endsWith(".grok-sandbox.com") ||
+      window.location.hostname.endsWith(".run.app") ||
+      window.self !== window.top)
   );
 }
 

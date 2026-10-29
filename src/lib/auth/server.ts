@@ -99,6 +99,9 @@ const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
 // these for the same server — trusting only `localhost` rejects `127.0.0.1` and
 // breaks email/password with "Invalid origin".
 const LOCAL_DEV_ORIGINS: string[] = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://[::1]:3000",
   "http://localhost:8080",
   "http://127.0.0.1:8080",
   "http://[::1]:8080",
@@ -106,11 +109,20 @@ const LOCAL_DEV_ORIGINS: string[] = [
 const baseURL = explicitBaseURL ?? {
   // Include loopback hosts so dynamic baseURL resolves for local email/password
   // (not only the preview wildcard).
-  allowedHosts: [...previewAllowedHosts, "localhost", "127.0.0.1", "[::1]"],
+  allowedHosts: [
+    ...previewAllowedHosts,
+    "localhost",
+    "localhost:3000",
+    "localhost:8080",
+    "127.0.0.1",
+    "127.0.0.1:3000",
+    "127.0.0.1:8080",
+    "[::1]",
+  ],
   // `auto` → trust both http:// and https:// expansions of allowedHosts
   // (preview is https; local dev is http).
   protocol: "auto" as const,
-  fallback: "http://localhost:8080",
+  fallback: "http://localhost:3000",
 };
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
@@ -213,16 +225,9 @@ export const auth = betterAuth({
   // Local email/password — toggled only via `./email-password` (not a plugin).
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
 
-  // `__Host-` prefixed cookies: the browser REFUSES any same-named cookie that
-  // carries a `Domain` attribute, so a sibling `*.grok.me` app cannot "toss" a
-  // `Domain=.grok.me` session cookie onto this app. `__Host-` requires Secure +
-  // Path=/ + no Domain; Better Auth otherwise uses `__Secure-` (which permits
-  // Domain), so we drop its auto prefix (`useSecureCookies: false`) and set
-  // Secure + the names ourselves. (Browsers allow Secure cookies on
-  // `http://localhost`, so local dev still works.)
   advanced: {
     useSecureCookies: false,
-    defaultCookieAttributes: { secure: true, sameSite: "lax", path: "/" },
+    defaultCookieAttributes: { secure: true, sameSite: "none", partitioned: true, path: "/" },
     cookies: {
       session_token: { name: SESSION_TOKEN_COOKIE },
       session_data: { name: "__Host-grok-auth.session_data" },

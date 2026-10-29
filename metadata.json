@@ -1,0 +1,8 @@
+{
+  "name": "Rapidez — Mototaxi en Carora",
+  "description": "Plataforma de transporte tipo Uber Moto / 99Moto para Carora, Estado Lara, Venezuela. Solicitud por punto de referencia, rastreo GPS en vivo y Pago Móvil.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}

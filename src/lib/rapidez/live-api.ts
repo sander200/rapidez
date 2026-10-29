@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ConnectorType } from "@/lib/app-data";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
-import { BANKS, MODELS, premiereAt } from "@/lib/rapidez/data";
+import { BANKS, MODELS, premiereAt, SERVICE_TIERS, type ServiceTierId } from "@/lib/rapidez/data";
 import { COMMISSION, OFFER_MS, SEARCH_RADIUS_M, fareFor, haversine, type LatLng } from "@/lib/rapidez/geo";
 
 const REVIEW_KEY = "Carora2026";
@@ -26,6 +26,7 @@ export interface Profile {
   rejectNote: string;
   hasCedulaPhoto: boolean;
   hasSelfie: boolean;
+  hasCirculationPhoto: boolean;
   saldoUsd: number;
   rating: number;
   ratingCount: number;
@@ -39,6 +40,7 @@ export interface NearbyMoto {
   plate: string;
   model: string;
   elite: boolean;
+  rating: number;
   meters: number;
 }
 
@@ -60,9 +62,16 @@ export interface TripView {
   payRef: string;
   payStatus: string;
   driverName: string;
+  driverPlate: string;
+  driverModel: string;
+  driverPhone: string;
+  driverCedula: string;
+  driverRating: number;
+  driverElite: boolean;
   driverLat: number | null;
   driverLng: number | null;
   passengerName: string;
+  passengerPhone: string;
   shareToken: string;
   offerUntil: number | null;
   commissionUsd: number;
@@ -70,6 +79,7 @@ export interface TripView {
   startedAt: string | null;
   riddenM: number;
   driverBank: string;
+  driverBankCode: string;
   driverBankPhone: string;
 }
 
@@ -103,6 +113,7 @@ interface ProfileRow {
   reject_note: string | null;
   cedula_photo: string | null;
   selfie: string | null;
+  circulation_photo: string | null;
   saldo_usd: number | null;
   rating_sum: number | null;
   rating_count: number | null;
@@ -127,6 +138,7 @@ function profileOf(row: ProfileRow): Profile {
     rejectNote: row.reject_note ?? "",
     hasCedulaPhoto: Boolean(row.cedula_photo),
     hasSelfie: Boolean(row.selfie),
+    hasCirculationPhoto: Boolean(row.circulation_photo),
     saldoUsd: Number(row.saldo_usd ?? 0),
     rating: Number(row.rating_count) > 0 ? Number(row.rating_sum) / Number(row.rating_count) : 0,
     ratingCount: Number(row.rating_count) || 0,
@@ -134,16 +146,18 @@ function profileOf(row: ProfileRow): Profile {
 }
 
 function assertReview(key: string) {
-  if (key !== REVIEW_KEY) throw new Error("Clave de revisión incorrecta.");
+  if (key.trim() !== REVIEW_KEY) throw new Error("Clave de revisión incorrecta.");
 }
 
-function photoOk(value: string, required: boolean) {
+function photoOk(value: string | undefined, required: boolean, missingMsg = "Falta la foto.") {
   if (!value) {
-    if (required) throw new Error("Falta la foto.");
+    if (required) throw new Error(missingMsg);
     return null;
   }
   if (!value.startsWith("data:image/")) throw new Error("La foto no es válida.");
-  if (value.length > 180000) throw new Error("La foto es demasiado pesada. Acércala y vuelve a tomarla.");
+  if (value.length > 220000) {
+    throw new Error("La foto es demasiado pesada. Acércala y vuelve a tomarla.");
+  }
   return value;
 }
 
@@ -178,35 +192,72 @@ export const submitProfile = createServerFn({ method: "POST" })
     bankName: string;
     cedulaPhoto: string;
     selfie: string;
+    circulationPhoto?: string;
   }) => input)
   .handler(async ({ context, data }) => {
     const role: Role = data.role === "driver" ? "driver" : "passenger";
     const fullName = data.fullName.trim();
     const phone = data.phone.replace(/\D/g, "");
-    const cedula = data.cedula.trim().toUpperCase();
-    if (fullName.length < 3) throw new Error("Escribe tu nombre completo.");
+    let cedula = data.cedula.trim().toUpperCase();
+    if (/^\d{5,9}$/.test(cedula)) cedula = `V-${cedula}`;
+    if (fullName.length < 3) throw new Error("Escribe tu nombre y apellido completo.");
     if (phone.length < 10) throw new Error("El teléfono no es válido.");
     if (!/^([VEJPG])-?\d{5,9}(-?\d)?$/.test(cedula)) {
-      throw new Error("La cédula o el RIF no es válido.");
+      throw new Error("La cédula o el RIF no es válido (ej. V-18422109).");
     }
-    const cedulaPhoto = photoOk(data.cedulaPhoto, true);
-    const selfie = photoOk(data.selfie, true);
+
+    const cedulaPhoto = photoOk(
+      data.cedulaPhoto,
+      true,
+      "La foto de la Cédula de Identidad es obligatoria.",
+    );
+    const selfie = photoOk(
+      data.selfie,
+      true,
+      role === "passenger"
+        ? "La selfie en vivo es obligatoria para el pasajero."
+        : "La selfie del conductor es obligatoria.",
+    );
+    const circulationPhoto =
+      role === "driver"
+        ? photoOk(
+            data.circulationPhoto,
+            true,
+            "La foto del Carnet de Circulación / documento de la moto es obligatoria para el motorista.",
+          )
+        : null;
+
     const model = MODELS.find((item) => item === data.model.trim()) ?? "";
     const bank = BANKS.find((item) => item.name === data.bankName.trim());
-    if (role === "driver" && data.plate.trim().length < 4) throw new Error("Falta la placa.");
-    if (role === "driver" && !model) throw new Error("Elige el modelo de la moto.");
-    if (role === "driver" && !bank) throw new Error("Elige el banco del pago móvil.");
-    if (role === "driver" && data.bankPhone.replace(/\D/g, "").length < 10) throw new Error("Falta el teléfono de pago móvil.");
+    if (role === "driver" && data.plate.trim().length < 4) {
+      throw new Error("Falta la placa de la moto.");
+    }
+    if (role === "driver" && !model) {
+      throw new Error("Elige el modelo de la moto.");
+    }
+    if (role === "driver" && !bank) {
+      throw new Error("Elige el banco receptor del Pago Móvil.");
+    }
+    if (role === "driver" && data.bankPhone.replace(/\D/g, "").length < 10) {
+      throw new Error("Falta el teléfono afiliado al Pago Móvil.");
+    }
+
     const sql = await getSql();
-    const existing = await sql<{ status: string }>`select status from profiles where user_id = ${context.userId}`;
-    if (existing[0]?.status === "approved") throw new Error("Esta cuenta ya está aprobada.");
+    const existing = await sql<{ status: string }>`
+      select status from profiles where user_id = ${context.userId}
+    `;
+    if (existing[0]?.status === "approved") {
+      throw new Error("Esta cuenta ya está aprobada.");
+    }
+
     await sql`
       insert into profiles (
         user_id, role, full_name, phone, cedula, status, elite,
-        cedula_photo, selfie, plate, model, bank_phone, bank_name, reject_note
+        cedula_photo, selfie, circulation_photo, plate, model, bank_phone, bank_name, reject_note
       ) values (
         ${context.userId}, ${role}, ${fullName}, ${phone}, ${cedula}, 'pending', false,
-        ${cedulaPhoto}, ${selfie}, ${data.plate.trim().toUpperCase()}, ${model},
+        ${cedulaPhoto}, ${selfie}, ${circulationPhoto},
+        ${data.plate.trim().toUpperCase()}, ${model},
         ${data.bankPhone.replace(/\D/g, "")}, ${bank?.name ?? ""}, ''
       )
       on conflict (user_id) do update set
@@ -218,12 +269,14 @@ export const submitProfile = createServerFn({ method: "POST" })
         elite = false,
         cedula_photo = excluded.cedula_photo,
         selfie = excluded.selfie,
+        circulation_photo = excluded.circulation_photo,
         plate = excluded.plate,
         model = excluded.model,
         bank_phone = excluded.bank_phone,
         bank_name = excluded.bank_name,
         reject_note = ''
     `;
+
     const emailed = await notifyDeveloper(
       [
         "Hay una verificación nueva en Rapidez Carora.",
@@ -231,8 +284,8 @@ export const submitProfile = createServerFn({ method: "POST" })
         `Nombre: ${fullName}`,
         `Teléfono: ${phone}`,
         `Cédula: ${cedula}`,
-        role === "driver" ? `Placa: ${data.plate.trim().toUpperCase()}` : "",
-        "La cédula y la selfie están en la bandeja del desarrollador, dentro de la app.",
+        role === "driver" ? `Placa: ${data.plate.trim().toUpperCase()} · Modelo: ${model}` : "",
+        "La cédula, la selfie y la documentación están en la bandeja del desarrollador, dentro de la app.",
         "Aprueba o rechaza ahí. La clave de revisión es Carora2026.",
       ]
         .filter(Boolean)
@@ -257,7 +310,9 @@ export const syncLive = createServerFn({ method: "POST" })
     }
     const deviceId = data.deviceId.trim();
     if (deviceId.length < 8) throw new Error("Este teléfono no está identificado.");
-    const bound = await sql<{ device_id: string }>`select device_id from devices where user_id = ${context.userId}`;
+    const bound = await sql<{ device_id: string }>`
+      select device_id from devices where user_id = ${context.userId}
+    `;
     if (!bound[0]) {
       await sql`insert into devices (user_id, device_id) values (${context.userId}, ${deviceId})`;
     } else if (bound[0].device_id !== deviceId) {
@@ -265,10 +320,13 @@ export const syncLive = createServerFn({ method: "POST" })
     } else {
       await sql`update devices set updated_at = now() where user_id = ${context.userId}`;
     }
+
     const lat = typeof data.lat === "number" ? data.lat : null;
     const lng = typeof data.lng === "number" ? data.lng : null;
     if (profile.role === "driver" && lat != null && lng != null) {
-      const prev = await sql<{ lat: number; lng: number }>`select lat, lng from positions where user_id = ${context.userId}`;
+      const prev = await sql<{ lat: number; lng: number }>`
+        select lat, lng from positions where user_id = ${context.userId}
+      `;
       const riding = await sql<{ id: string }>`
         select id from trips where driver_id = ${context.userId} and status = 'riding' limit 1
       `;
@@ -310,11 +368,13 @@ async function nearby(origin: LatLng | null): Promise<NearbyMoto[]> {
     plate: string | null;
     model: string | null;
     elite: boolean;
+    rating_sum: number | null;
+    rating_count: number | null;
     lat: number;
     lng: number;
     updated_at: string | Date;
   }>`
-    select p.user_id, p.full_name, p.plate, p.model, p.elite, pos.lat, pos.lng, pos.updated_at
+    select p.user_id, p.full_name, p.plate, p.model, p.elite, p.rating_sum, p.rating_count, pos.lat, pos.lng, pos.updated_at
     from positions pos
     join profiles p on p.user_id = pos.user_id
     where p.role = 'driver' and p.status = 'approved' and pos.online = true
@@ -324,6 +384,8 @@ async function nearby(origin: LatLng | null): Promise<NearbyMoto[]> {
     .filter((row) => now - new Date(row.updated_at).getTime() < FRESH_MS)
     .map((row) => {
       const point = { lat: Number(row.lat), lng: Number(row.lng) };
+      const count = Number(row.rating_count) || 0;
+      const rating = count > 0 ? Number(row.rating_sum) / count : 0;
       return {
         id: row.user_id,
         name: row.full_name,
@@ -332,6 +394,7 @@ async function nearby(origin: LatLng | null): Promise<NearbyMoto[]> {
         plate: row.plate ?? "",
         model: row.model ?? "",
         elite: Boolean(row.elite),
+        rating: Math.round(rating * 100) / 100,
         meters: origin ? Math.round(haversine(origin, point)) : 0,
       };
     })
@@ -371,18 +434,30 @@ async function tripView(row: TripRow): Promise<TripView> {
   const people = await sql<{
     user_id: string;
     full_name: string;
+    phone: string;
+    cedula: string;
+    plate: string | null;
+    model: string | null;
+    elite: boolean;
+    rating_sum: number | null;
+    rating_count: number | null;
     lat: number | null;
     lng: number | null;
     bank_name: string | null;
     bank_phone: string | null;
   }>`
-    select p.user_id, p.full_name, pos.lat, pos.lng, p.bank_name, p.bank_phone
+    select p.user_id, p.full_name, p.phone, p.cedula, p.plate, p.model, p.elite,
+           p.rating_sum, p.rating_count, pos.lat, pos.lng, p.bank_name, p.bank_phone
     from profiles p
     left join positions pos on pos.user_id = p.user_id
     where p.user_id = ${row.passenger_id} or p.user_id = ${row.driver_id ?? ""}
   `;
   const passenger = people.find((p) => p.user_id === row.passenger_id);
   const driver = people.find((p) => p.user_id === row.driver_id);
+  const dCount = Number(driver?.rating_count) || 0;
+  const dRating = dCount > 0 ? Number(driver?.rating_sum) / dCount : 0;
+  const bankObj = BANKS.find((b) => b.name === (driver?.bank_name ?? ""));
+
   return {
     id: row.id,
     passengerId: row.passenger_id,
@@ -401,9 +476,16 @@ async function tripView(row: TripRow): Promise<TripView> {
     payRef: row.pay_ref ?? "",
     payStatus: row.pay_status,
     driverName: driver?.full_name ?? "",
+    driverPlate: driver?.plate ?? "",
+    driverModel: driver?.model ?? "",
+    driverPhone: driver?.phone ?? "",
+    driverCedula: driver?.cedula ?? "",
+    driverRating: Math.round(dRating * 100) / 100,
+    driverElite: Boolean(driver?.elite),
     driverLat: driver?.lat == null ? null : Number(driver.lat),
     driverLng: driver?.lng == null ? null : Number(driver.lng),
     passengerName: passenger?.full_name ?? "",
+    passengerPhone: passenger?.phone ?? "",
     shareToken: row.share_token ?? "",
     offerUntil: row.offer_until_ms == null ? null : Number(row.offer_until_ms),
     commissionUsd: Number(row.commission_usd ?? 0),
@@ -411,6 +493,7 @@ async function tripView(row: TripRow): Promise<TripView> {
     startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
     riddenM: Number(row.ridden_m ?? 0),
     driverBank: driver?.bank_name ?? "",
+    driverBankCode: bankObj?.code ?? "",
     driverBankPhone: driver?.bank_phone ?? "",
   };
 }
@@ -556,11 +639,16 @@ export const requestTrip = createServerFn({ method: "POST" })
     destRef: string;
     payMethod: string;
     preferredDriverId: string | null;
+    serviceTier?: ServiceTierId;
   }) => input)
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const me = await sql<{ role: string; status: string }>`select role, status from profiles where user_id = ${context.userId}`;
-    if (me[0]?.role !== "passenger" || me[0]?.status !== "approved") throw new Error("Tu cuenta aún no puede pedir.");
+    const me = await sql<{ role: string; status: string }>`
+      select role, status from profiles where user_id = ${context.userId}
+    `;
+    if (me[0]?.role !== "passenger" || me[0]?.status !== "approved") {
+      throw new Error("Tu cuenta aún no puede pedir carreras.");
+    }
     const busy = await sql<{ id: string }>`
       select id from trips where passenger_id = ${context.userId} and status not in ('done', 'cancelled') limit 1
     `;
@@ -574,7 +662,16 @@ export const requestTrip = createServerFn({ method: "POST" })
     const ref = data.pickupRef.trim() || "Donde estoy";
     const id = `t_${crypto.randomUUID()}`;
     const share = crypto.randomUUID().replace(/-/g, "");
-    const pay = data.payMethod === "PAGO_MOVIL" ? "PAGO_MOVIL" : data.payMethod === "CASH_VES" ? "CASH_VES" : "CASH_USD";
+    const pay =
+      data.payMethod === "PAGO_MOVIL"
+        ? "PAGO_MOVIL"
+        : data.payMethod === "CASH_VES"
+          ? "CASH_VES"
+          : "CASH_USD";
+    const tier = SERVICE_TIERS.find((t) => t.id === data.serviceTier) ?? SERVICE_TIERS[0];
+    const baseFare = fareFor(distanceM, premiereAt(dest));
+    const totalFare = Math.round((baseFare + tier.extraUsd) * 100) / 100;
+
     await sql`
       insert into trips (
         id, passenger_id, preferred_driver_id, status,
@@ -583,7 +680,7 @@ export const requestTrip = createServerFn({ method: "POST" })
       ) values (
         ${id}, ${context.userId}, ${data.preferredDriverId}, 'open',
         ${pickup.lat}, ${pickup.lng}, ${ref}, ${dest.lat}, ${dest.lng}, ${destRef},
-        ${fareFor(distanceM, premiereAt(dest))}, ${distanceM}, ${pay}, ${share}
+        ${totalFare}, ${distanceM}, ${pay}, ${share}
       )
     `;
     await cascadeOffers();
@@ -595,8 +692,12 @@ export const acceptTrip = createServerFn({ method: "POST" })
   .validator((input: { tripId: string }) => input)
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const me = await sql<{ role: string; status: string }>`select role, status from profiles where user_id = ${context.userId}`;
-    if (me[0]?.role !== "driver" || me[0]?.status !== "approved") throw new Error("Solo un mototaxista aprobado puede aceptar.");
+    const me = await sql<{ role: string; status: string }>`
+      select role, status from profiles where user_id = ${context.userId}
+    `;
+    if (me[0]?.role !== "driver" || me[0]?.status !== "approved") {
+      throw new Error("Solo un mototaxista aprobado puede aceptar.");
+    }
     const now = Date.now();
     const taken = await sql<{ id: string }>`
       update trips set driver_id = ${context.userId}, status = 'accepted', updated_at = now()
@@ -635,8 +736,8 @@ export const setTripStatus = createServerFn({ method: "POST" })
     if (["arrived", "riding", "pay"].includes(data.status) && trip.driver_id !== context.userId) {
       throw new Error("Eso lo marca el mototaxista.");
     }
-    if (data.status === "done" && trip.driver_id !== context.userId && trip.passenger_id !== context.userId) {
-      throw new Error("No puedes cerrar esta carrera.");
+    if (data.status === "done" && trip.driver_id !== context.userId) {
+      throw new Error("El cobro y cierre de la carrera lo confirma el mototaxista.");
     }
     const payRef = (data.payRef ?? "").replace(/\D/g, "").slice(0, 6);
     const commission =
@@ -674,8 +775,11 @@ export interface ReviewItem {
   cedula: string;
   plate: string;
   model: string;
+  bankName: string;
+  bankPhone: string;
   cedulaPhoto: string;
   selfie: string;
+  circulationPhoto: string;
 }
 
 export const reviewList = createServerFn({ method: "POST" })
@@ -695,8 +799,11 @@ export const reviewList = createServerFn({ method: "POST" })
       cedula: row.cedula,
       plate: row.plate ?? "",
       model: row.model ?? "",
+      bankName: row.bank_name ?? "",
+      bankPhone: row.bank_phone ?? "",
       cedulaPhoto: row.cedula_photo ?? "",
       selfie: row.selfie ?? "",
+      circulationPhoto: row.circulation_photo ?? "",
     }));
   });
 
@@ -1039,7 +1146,8 @@ export const topUp = createServerFn({ method: "POST" })
   .validator((input: { key: string; cedula: string }) => input)
   .handler(async ({ data }) => {
     assertReview(data.key);
-    const cedula = data.cedula.trim().toUpperCase();
+    let cedula = data.cedula.trim().toUpperCase();
+    if (/^\d{5,9}$/.test(cedula)) cedula = `V-${cedula}`;
     const sql = await getSql();
     const rows = await sql<{ user_id: string }>`
       update profiles set saldo_usd = saldo_usd + 5
@@ -1056,6 +1164,8 @@ export interface SharedView {
   dest: string;
   pickup: string;
   driverName: string;
+  driverPlate: string;
+  driverModel: string;
   lat: number | null;
   lng: number | null;
 }
@@ -1074,6 +1184,8 @@ export const sharedTrip = createServerFn({ method: "GET" })
       dest: view.destRef,
       pickup: view.pickupRef,
       driverName: view.driverName.split(" ")[0] ?? "",
+      driverPlate: view.driverPlate,
+      driverModel: view.driverModel,
       lat: view.driverLat,
       lng: view.driverLng,
     };
