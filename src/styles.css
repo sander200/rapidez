@@ -20,7 +20,7 @@
   }
   body {
     margin: 0;
-    background: var(--color-ink);
+    background: #080906;
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-text-size-adjust: 100%;
@@ -40,25 +40,94 @@
   }
 }
 
+/* Laterales en negro profundo con destellos amarillos sutiles y elegantes */
 .stage {
+  position: relative;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--color-ink);
+  overflow: hidden;
+  background-color: #070806;
+  background-image:
+    radial-gradient(circle at 8% 22%, rgb(230 161 0 / 0.16) 0%, transparent 38%),
+    radial-gradient(circle at 92% 78%, rgb(255 190 26 / 0.14) 0%, transparent 40%),
+    radial-gradient(circle at 12% 85%, rgb(230 161 0 / 0.08) 0%, transparent 32%),
+    radial-gradient(circle at 88% 18%, rgb(230 161 0 / 0.09) 0%, transparent 32%),
+    linear-gradient(180deg, #0a0b08 0%, #050604 100%);
+}
+
+.stage-flank {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 22vw;
+  max-width: 320px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.stage-flank-left {
+  left: 0;
+  background:
+    radial-gradient(ellipse 65% 42% at 0% 30%, rgb(230 161 0 / 0.15), transparent 75%),
+    radial-gradient(ellipse 50% 35% at 15% 75%, rgb(255 200 40 / 0.08), transparent 70%);
+  border-right: 1px solid rgb(230 161 0 / 0.07);
+}
+
+.stage-flank-right {
+  right: 0;
+  background:
+    radial-gradient(ellipse 65% 42% at 100% 68%, rgb(230 161 0 / 0.15), transparent 75%),
+    radial-gradient(ellipse 50% 35% at 85% 24%, rgb(255 200 40 / 0.08), transparent 70%);
+  border-left: 1px solid rgb(230 161 0 / 0.07);
 }
 
 .phone {
   position: relative;
+  z-index: 10;
   width: 100%;
   height: 100dvh;
   overflow: hidden;
   background: var(--color-map);
+  box-shadow:
+    inset 3px 0 12px -4px rgb(10 11 8 / 0.55),
+    inset -3px 0 12px -4px rgb(10 11 8 / 0.55);
+}
+
+/* Sutil filete lateral negro + destello ámbar en los bordes del visor */
+.phone::before,
+.phone::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  z-index: 25;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgb(10 11 8 / 0.85) 0%,
+    rgb(230 161 0 / 0.42) 28%,
+    rgb(10 11 8 / 0.75) 55%,
+    rgb(230 161 0 / 0.35) 82%,
+    rgb(10 11 8 / 0.9) 100%
+  );
+}
+
+.phone::before {
+  left: 0;
+}
+
+.phone::after {
+  right: 0;
 }
 
 .stage-note {
   display: none;
+  position: relative;
+  z-index: 10;
 }
 
 .sheet {
@@ -70,9 +139,12 @@
   max-height: 76%;
   overflow: auto;
   border-radius: 1.5rem 1.5rem 0 0;
+  border-top: 2px solid rgb(230 161 0 / 0.38);
   background: var(--color-sheet);
   color: var(--color-ink);
-  box-shadow: 0 -12px 40px rgb(26 28 20 / 0.16);
+  box-shadow:
+    0 -14px 42px rgb(8 9 6 / 0.28),
+    0 -2px 14px rgb(230 161 0 / 0.12);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -213,15 +285,20 @@
     padding: 1.5rem;
   }
   .phone {
-    width: 420px;
+    width: 428px;
     height: min(880px, calc(100dvh - 5.5rem));
-    border-radius: 1.75rem;
-    box-shadow: 0 24px 70px rgb(0 0 0 / 0.38);
+    border-radius: 2rem;
+    border: 2px solid rgb(230 161 0 / 0.28);
+    box-shadow:
+      0 26px 80px rgb(0 0 0 / 0.75),
+      0 0 48px -10px rgb(230 161 0 / 0.18),
+      0 0 0 6px rgb(12 13 10 / 0.92);
   }
   .stage-note {
     display: block;
-    color: var(--color-paper);
-    font-size: 0.95rem;
+    color: rgb(244 239 228 / 0.78);
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
   }
 }
 

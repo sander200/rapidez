@@ -1941,14 +1941,14 @@ function PassengerDesk({
   const center = useRapidez((s) => s.center);
   const route = useRapidez((s) => s.route);
   const focusPlace = useRapidez((s) => s.focusPlace);
-  const [placeId, setPlaceId] = useState<string | null>("plaza");
+  const [placeId, setPlaceId] = useState<string | null>(null);
   const [customDest, setCustomDest] = useState<LatLng | null>(null);
   const [pickingMapDest, setPickingMapDest] = useState(false);
   const [tierId, setTierId] = useState<ServiceTierId>("moto");
   const [pay, setPay] = useState("PAGO_MOVIL");
   const [cashBillUsd, setCashBillUsd] = useState<number | null>(null);
   const [pickupNote, setPickupNote] = useState("");
-  const [point, setPoint] = useState("Frente a la entrada principal");
+  const [point, setPoint] = useState("");
   const [needHelmet, setNeedHelmet] = useState(true);
   const [hasBag, setHasBag] = useState(false);
   const [savedHome, setSavedHome] = useState<SavedAddress | null>(() => {

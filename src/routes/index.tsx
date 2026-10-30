@@ -6,8 +6,12 @@ export const Route = createFileRoute("/")({ component: Home });
 function Home() {
   return (
     <main className="stage">
+      <div className="stage-flank stage-flank-left" aria-hidden="true" />
+      <div className="stage-flank stage-flank-right" aria-hidden="true" />
       <LiveApp />
-      <p className="stage-note">Un destino. Primero la moto más cercana, 18 segundos.</p>
+      <p className="stage-note">
+        Rapidez · Mototaxi en Carora · Seguimiento GPS y Pago Móvil
+      </p>
     </main>
   );
 }
