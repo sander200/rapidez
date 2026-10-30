@@ -1,0 +1,27 @@
+{
+  "appId": "ve.carora.rapidez.app",
+  "appName": "Rapidez Carora",
+  "webDir": "dist/client",
+  "bundledWebRuntime": false,
+  "backgroundColor": "#1A1C14",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#1A1C14"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#1A1C14",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "Geolocation": {
+      "permissions": ["location"]
+    }
+  }
+}

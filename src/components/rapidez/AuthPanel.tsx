@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Smartphone } from "lucide-react";
 import { GROK_PROVIDERS, authClient, setBearerToken, signIn } from "@/lib/auth/client";
 
 export function AuthPanel() {
@@ -145,6 +145,15 @@ export function AuthPanel() {
           className="mt-3 h-11 w-full rounded-full bg-ink text-sm font-semibold text-paper disabled:opacity-40"
         >
           {pending ? "Procesando…" : mode === "up" ? "Continuar al registro" : "Entrar"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent("open-apk-modal"))}
+          className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-full border border-brand bg-paper text-xs font-extrabold text-ink shadow-sm"
+        >
+          <Smartphone className="size-3.5 text-brand" />
+          Instalar App / Generar APK (Android & iOS)
         </button>
 
         {showGrokOAuth && (

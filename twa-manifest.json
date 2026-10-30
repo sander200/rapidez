@@ -1,0 +1,56 @@
+{
+  "packageId": "ve.carora.rapidez.app",
+  "name": "Rapidez Carora",
+  "launcherName": "Rapidez",
+  "display": "standalone",
+  "orientation": "portrait",
+  "themeColor": "#1A1C14",
+  "themeColorDark": "#1A1C14",
+  "navigationColor": "#1A1C14",
+  "navigationColorDark": "#1A1C14",
+  "navigationDividerColor": "#2C2E24",
+  "navigationDividerColorDark": "#2C2E24",
+  "backgroundColor": "#1A1C14",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "/pwa-512x512.png",
+  "maskableIconUrl": "/pwa-maskable-512x512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "rapidez-carora-key"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "Pedir Mototaxi",
+      "shortName": "Pedir Moto",
+      "url": "/?mode=passenger",
+      "chosenIconUrl": "/pwa-192x192.png"
+    },
+    {
+      "name": "Modo Motorista",
+      "shortName": "Motorista",
+      "url": "/?mode=driver",
+      "chosenIconUrl": "/pwa-192x192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    },
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false
+}

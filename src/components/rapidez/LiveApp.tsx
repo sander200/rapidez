@@ -23,6 +23,7 @@ import {
   Plus,
   Share2,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Star,
   Sun,
@@ -37,6 +38,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthPanel } from "@/components/rapidez/AuthPanel";
 import { MapCanvas } from "@/components/rapidez/MapCanvas";
 import { beepOffer, unlockAudio } from "@/lib/rapidez/audio";
+import { ApkInstallModal } from "@/components/rapidez/ApkInstallModal";
 import { PushNotificationModal } from "@/components/rapidez/PushNotificationModal";
 import {
   registerServiceWorker,
@@ -193,9 +195,13 @@ export function LiveApp() {
   const phase = useRapidez((s) => s.phase);
   const showRoadLayer = useRapidez((s) => s.showRoadLayer);
   const showPin = phase === "pickup" || phase === "destination";
+  const [apkModal, setApkModal] = useState(false);
 
   useEffect(() => {
     void registerServiceWorker();
+    const onOpenApk = () => setApkModal(true);
+    window.addEventListener("open-apk-modal", onOpenApk);
+    return () => window.removeEventListener("open-apk-modal", onOpenApk);
   }, []);
 
   const centerOnCarora = () => {
@@ -264,9 +270,18 @@ export function LiveApp() {
         </div>
         <button
           type="button"
+          onClick={() => setApkModal(true)}
+          title="Instalar App / Generar APK (Android & iOS)"
+          className="ml-auto flex h-10 items-center gap-1 rounded-full bg-ink px-2.5 text-[11px] font-extrabold text-paper shadow-lg"
+        >
+          <Smartphone className="size-3.5 text-brand shrink-0" />
+          <span>APK</span>
+        </button>
+        <button
+          type="button"
           onClick={() => window.dispatchEvent(new CustomEvent("open-push-modal"))}
           title="Alertas Web Push & Service Worker"
-          className="ml-auto flex h-10 items-center gap-1 rounded-full bg-paper px-2.5 text-[11px] font-bold text-ink shadow-lg border border-line"
+          className="flex h-10 items-center gap-1 rounded-full bg-paper px-2.5 text-[11px] font-bold text-ink shadow-lg border border-line"
         >
           <BellRing className="size-3.5 text-brand shrink-0" />
           <span className="hidden sm:inline">Push</span>
@@ -340,7 +355,9 @@ export function LiveApp() {
       <div data-sheet className="sheet">
         <div className="sheet-in px-4 pt-3 pb-5">
           <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line" />
-          {isPending ? (
+          {apkModal ? (
+            <ApkInstallModal onClose={() => setApkModal(false)} />
+          ) : isPending ? (
             <p className="text-sm text-muted">Cargando tu cuenta…</p>
           ) : !user ? (
             <AuthPanel />

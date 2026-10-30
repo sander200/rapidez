@@ -24,10 +24,11 @@ export const Route = createRootRoute({
       { name: "apple-mobile-web-app-title", content: "Rapidez" },
     ],
     links: [
+      { rel: "icon", type: "image/png", sizes: "192x192", href: "/pwa-192x192.png" },
       { rel: "icon", type: "image/jpeg", href: "/logo.jpg" },
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/logo.jpg" },
+      { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
