@@ -72,6 +72,9 @@ interface RapidezState {
   profileStatus: "pending" | "approved" | "rejected" | "blocked" | null;
   pushText: string;
   fleet: { id: string; name: string; lat: number; lng: number; elite: boolean }[];
+  showRoadLayer: boolean;
+  rainActive: boolean;
+  roadReports: import("@/lib/rapidez/data").LiveRoadReport[];
   payout: Payout;
   mapSeq: number;
   mapCmd: MapCmd | null;
@@ -151,6 +154,9 @@ export const useRapidez = create<RapidezState>((set, get) => ({
   profileStatus: null,
   pushText: "",
   fleet: [],
+  showRoadLayer: true,
+  rainActive: false,
+  roadReports: [],
   center: HOME,
   pickupRef: "",
   pickupLabel: "",

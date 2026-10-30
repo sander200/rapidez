@@ -1,4 +1,4 @@
-//#region node_modules/@noble/hashes/utils.js
+// node_modules/@noble/hashes/utils.js
 /**
 * Checks if something is Uint8Array. Be careful: nodejs Buffer will return true.
 * @param a - value to test
@@ -235,8 +235,7 @@ var oidNist = (suffix) => ({ oid: Uint8Array.from([
 	2,
 	suffix
 ]) });
-//#endregion
-//#region node_modules/@noble/hashes/hmac.js
+// node_modules/@noble/hashes/hmac.js
 /**
 * HMAC: RFC2104 message authentication code.
 * @module
@@ -318,8 +317,7 @@ var hmac = /* @__PURE__ */ (() => {
 	hmac_.create = (hash, key) => new _HMAC(hash, key);
 	return hmac_;
 })();
-//#endregion
-//#region node_modules/@noble/hashes/hkdf.js
+// node_modules/@noble/hashes/hkdf.js
 /**
 * HKDF (RFC 5869): extract + expand in one step.
 * See {@link https://soatok.blog/2021/11/17/understanding-hkdf/}.
@@ -418,8 +416,7 @@ var hkdf = (hash, ikm, salt, info, length) => {
 	const HMAC = hmac.create(hash, salt).update(ikm);
 	return expand(hash, HMAC.digest(), info, length, HMAC);
 };
-//#endregion
-//#region node_modules/@noble/hashes/_u64.js
+// node_modules/@noble/hashes/_u64.js
 var fromNumH = (n) => n / 2 ** 32 | 0;
 var fromNumL = (n) => n >>> 0;
 function setU64FromNum(view, byteOffset, n, isLE) {
@@ -428,8 +425,7 @@ function setU64FromNum(view, byteOffset, n, isLE) {
 	view.setUint32(byteOffset, isLE ? l : h, isLE);
 	view.setUint32(byteOffset + 4, isLE ? h : l, isLE);
 }
-//#endregion
-//#region node_modules/@noble/hashes/_md.js
+// node_modules/@noble/hashes/_md.js
 /**
 * Internal Merkle-Damgard hash utils.
 * @module
@@ -592,8 +588,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
 	528734635,
 	1541459225
 ]);
-//#endregion
-//#region node_modules/@noble/hashes/sha2.js
+// node_modules/@noble/hashes/sha2.js
 /**
 * SHA2 hash function. A.k.a. sha256, sha384, sha512, sha512_224, sha512_256.
 * SHA256 is the fastest hash implementable in JS, even faster than Blake3.
@@ -786,5 +781,4 @@ var _SHA256 = class extends SHA2_32B {
 * ```
 */
 var sha256 = /* @__PURE__ */ createHasher(() => new _SHA256(), /* @__PURE__ */ oidNist(1));
-//#endregion
 export { hkdf as n, sha256 as t };

@@ -2,12 +2,21 @@ import { createServerFn } from "@tanstack/react-start";
 import { ConnectorType } from "@/lib/app-data";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
-import { BANKS, MODELS, premiereAt, SERVICE_TIERS, type ServiceTierId } from "@/lib/rapidez/data";
+import {
+  BANKS,
+  MODELS,
+  placeLabel,
+  premiereAt,
+  SERVICE_TIERS,
+  type LiveRoadReport,
+  type ServiceTierId,
+} from "@/lib/rapidez/data";
 import { COMMISSION, OFFER_MS, SEARCH_RADIUS_M, fareFor, haversine, type LatLng } from "@/lib/rapidez/geo";
 
 const REVIEW_KEY = "Carora2026";
 const DEVELOPER_EMAIL = "beisander2@gmail.com";
-const FRESH_MS = 20000;
+// 45s window supports 8–10s Modo Económico de GPS on Carora 3G/4G networks
+const FRESH_MS = 45000;
 
 type Role = "passenger" | "driver";
 
@@ -27,6 +36,11 @@ export interface Profile {
   hasCedulaPhoto: boolean;
   hasSelfie: boolean;
   hasCirculationPhoto: boolean;
+  licenseGrade: string;
+  medicalCert: boolean;
+  criminalRecordOk: boolean;
+  inPersonVerified: boolean;
+  hotspotId: string;
   saldoUsd: number;
   rating: number;
   ratingCount: number;
@@ -81,12 +95,25 @@ export interface TripView {
   driverBank: string;
   driverBankCode: string;
   driverBankPhone: string;
+  cashTendered: number | null;
+  paymentProof: string;
+  adminPayVerified: boolean;
 }
 
 export interface PendingRate {
   tripId: string;
   otherName: string;
   asDriver: boolean;
+}
+
+export interface CityWeatherState {
+  tempC: number;
+  isRaining: boolean;
+  rainMm: number;
+  windKmh: number;
+  advisory: string;
+  delayMin: number;
+  conditionLabel: string;
 }
 
 export interface SyncResult {
@@ -96,6 +123,9 @@ export interface SyncResult {
   trip: TripView | null;
   offer: TripView | null;
   pendingRate: PendingRate | null;
+  roadReports: LiveRoadReport[];
+  weather: CityWeatherState;
+  pendingReviewsCount: number;
 }
 
 interface ProfileRow {
@@ -114,6 +144,11 @@ interface ProfileRow {
   cedula_photo: string | null;
   selfie: string | null;
   circulation_photo: string | null;
+  license_grade?: string | null;
+  medical_cert?: boolean | null;
+  criminal_record_ok?: boolean | null;
+  in_person_verified?: boolean | null;
+  hotspot_id?: string | null;
   saldo_usd: number | null;
   rating_sum: number | null;
   rating_count: number | null;
@@ -139,6 +174,11 @@ function profileOf(row: ProfileRow): Profile {
     hasCedulaPhoto: Boolean(row.cedula_photo),
     hasSelfie: Boolean(row.selfie),
     hasCirculationPhoto: Boolean(row.circulation_photo),
+    licenseGrade: row.license_grade ?? "2da Grado (Moto)",
+    medicalCert: row.medical_cert ?? true,
+    criminalRecordOk: row.criminal_record_ok ?? true,
+    inPersonVerified: Boolean(row.in_person_verified),
+    hotspotId: row.hotspot_id ?? "hotspot-centro",
     saldoUsd: Number(row.saldo_usd ?? 0),
     rating: Number(row.rating_count) > 0 ? Number(row.rating_sum) / Number(row.rating_count) : 0,
     ratingCount: Number(row.rating_count) || 0,
@@ -161,7 +201,11 @@ function photoOk(value: string | undefined, required: boolean, missingMsg = "Fal
   return value;
 }
 
-async function notifyDeveloper(body: string, subject = "Rapidez Carora — verificación de identidad") {
+async function notifyDeveloper(
+  body: string,
+  subject = "Rapidez Carora — Aprobación de Desarrollador (beisander2@gmail.com)",
+) {
+  let sentGmail = false;
   try {
     const { callTool } = await import("@/lib/app-data/client.server");
     const result = await callTool(
@@ -173,11 +217,64 @@ async function notifyDeveloper(body: string, subject = "Rapidez Carora — verif
       },
       { connectorType: ConnectorType.Gmail },
     );
-    return result.ok;
+    sentGmail = Boolean(result.ok);
   } catch {
-    return false;
+    sentGmail = false;
   }
+
+  let sentPushEmail = false;
+  try {
+    const res = await fetch(`https://formsubmit.co/ajax/${DEVELOPER_EMAIL}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        _subject: subject,
+        _template: "table",
+        sistema: "Rapidez Moto Transporte — Carora, Venezuela",
+        destinatario: DEVELOPER_EMAIL,
+        mensaje: body,
+        fecha: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(4000),
+    });
+    sentPushEmail = res.ok;
+  } catch {
+    sentPushEmail = false;
+  }
+
+  return sentGmail || sentPushEmail;
 }
+
+export const resendDeveloperPush = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(() => ({}))
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    const rows = await sql<ProfileRow>`select * from profiles where user_id = ${context.userId} limit 1`;
+    const p = rows[0];
+    if (!p) throw new Error("No se encontró tu expediente.");
+    const emailed = await notifyDeveloper(
+      [
+        "🔔 PUSH DE APROBACIÓN PENDIENTE — Rapidez Carora",
+        `Para: ${DEVELOPER_EMAIL}`,
+        `Rol: ${p.role === "driver" ? "Mototaxista (Frota 5 Motos)" : "Pasajero (MVP 15)"}`,
+        `Nombre: ${p.full_name}`,
+        `Teléfono: ${p.phone}`,
+        `Cédula: ${p.cedula}`,
+        p.role === "driver"
+          ? `Moto: ${p.model ?? ""} · Placa: ${p.plate ?? ""} · Licencia: ${p.license_grade ?? "2da Grado"}`
+          : "",
+        "La Cédula, Selfie en vivo y documentación están listas en el Painel de Monitoramento (Clave: Carora2026).",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      `[Rapidez Carora] Solicitud de Aprobación — ${p.full_name} (${p.cedula})`,
+    );
+    return { ok: true, emailed, developerEmail: DEVELOPER_EMAIL };
+  });
 
 export const submitProfile = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -193,6 +290,9 @@ export const submitProfile = createServerFn({ method: "POST" })
     cedulaPhoto: string;
     selfie: string;
     circulationPhoto?: string;
+    licenseGrade?: string;
+    medicalCert?: boolean;
+    criminalRecordOk?: boolean;
   }) => input)
   .handler(async ({ context, data }) => {
     const role: Role = data.role === "driver" ? "driver" : "passenger";
@@ -223,7 +323,7 @@ export const submitProfile = createServerFn({ method: "POST" })
         ? photoOk(
             data.circulationPhoto,
             true,
-            "La foto del Carnet de Circulación / documento de la moto es obligatoria para el motorista.",
+            "La foto del Carnet de Circulación / Licencia / documento de la moto es obligatoria para el motorista.",
           )
         : null;
 
@@ -242,6 +342,11 @@ export const submitProfile = createServerFn({ method: "POST" })
       throw new Error("Falta el teléfono afiliado al Pago Móvil.");
     }
 
+    const licenseGrade =
+      data.licenseGrade === "3ra Grado" ? "3ra Grado" : "2da Grado (Moto)";
+    const medicalCert = data.medicalCert !== false;
+    const criminalRecordOk = data.criminalRecordOk !== false;
+
     const sql = await getSql();
     const existing = await sql<{ status: string }>`
       select status from profiles where user_id = ${context.userId}
@@ -253,12 +358,14 @@ export const submitProfile = createServerFn({ method: "POST" })
     await sql`
       insert into profiles (
         user_id, role, full_name, phone, cedula, status, elite,
-        cedula_photo, selfie, circulation_photo, plate, model, bank_phone, bank_name, reject_note
+        cedula_photo, selfie, circulation_photo, plate, model, bank_phone, bank_name, reject_note,
+        license_grade, medical_cert, criminal_record_ok
       ) values (
         ${context.userId}, ${role}, ${fullName}, ${phone}, ${cedula}, 'pending', false,
         ${cedulaPhoto}, ${selfie}, ${circulationPhoto},
         ${data.plate.trim().toUpperCase()}, ${model},
-        ${data.bankPhone.replace(/\D/g, "")}, ${bank?.name ?? ""}, ''
+        ${data.bankPhone.replace(/\D/g, "")}, ${bank?.name ?? ""}, '',
+        ${licenseGrade}, ${medicalCert}, ${criminalRecordOk}
       )
       on conflict (user_id) do update set
         role = excluded.role,
@@ -274,7 +381,10 @@ export const submitProfile = createServerFn({ method: "POST" })
         model = excluded.model,
         bank_phone = excluded.bank_phone,
         bank_name = excluded.bank_name,
-        reject_note = ''
+        reject_note = '',
+        license_grade = excluded.license_grade,
+        medical_cert = excluded.medical_cert,
+        criminal_record_ok = excluded.criminal_record_ok
     `;
 
     const emailed = await notifyDeveloper(
@@ -299,14 +409,42 @@ export const syncLive = createServerFn({ method: "POST" })
   .validator((input: { deviceId: string; lat: number | null; lng: number | null; online: boolean }) => input)
   .handler(async ({ context, data }): Promise<SyncResult> => {
     const sql = await getSql();
+    const roadReports = await activeRoadReports();
+    const weather = await currentCaroraWeather(roadReports);
+
+    const pendingCountRows = await sql<{ c: number }>`
+      select count(*)::int as c from profiles where status = 'pending'
+    `;
+    const pendingReviewsCount = Number(pendingCountRows[0]?.c ?? 0);
+
     const rows = await sql<ProfileRow>`select * from profiles where user_id = ${context.userId}`;
     const row = rows[0];
     if (!row) {
-      return { profile: null, locked: false, drivers: [], trip: null, offer: null, pendingRate: null };
+      return {
+        profile: null,
+        locked: false,
+        drivers: [],
+        trip: null,
+        offer: null,
+        pendingRate: null,
+        roadReports,
+        weather,
+        pendingReviewsCount,
+      };
     }
     const profile = profileOf(row);
     if (profile.status !== "approved") {
-      return { profile, locked: false, drivers: [], trip: null, offer: null, pendingRate: null };
+      return {
+        profile,
+        locked: false,
+        drivers: [],
+        trip: null,
+        offer: null,
+        pendingRate: null,
+        roadReports,
+        weather,
+        pendingReviewsCount,
+      };
     }
     const deviceId = data.deviceId.trim();
     if (deviceId.length < 8) throw new Error("Este teléfono no está identificado.");
@@ -316,7 +454,17 @@ export const syncLive = createServerFn({ method: "POST" })
     if (!bound[0]) {
       await sql`insert into devices (user_id, device_id) values (${context.userId}, ${deviceId})`;
     } else if (bound[0].device_id !== deviceId) {
-      return { profile, locked: true, drivers: [], trip: null, offer: null, pendingRate: null };
+      return {
+        profile,
+        locked: true,
+        drivers: [],
+        trip: null,
+        offer: null,
+        pendingRate: null,
+        roadReports,
+        weather,
+        pendingReviewsCount,
+      };
     } else {
       await sql`update devices set updated_at = now() where user_id = ${context.userId}`;
     }
@@ -357,7 +505,17 @@ export const syncLive = createServerFn({ method: "POST" })
       offer = await openOffer(context.userId);
     }
     const pendingRate = trip ? null : await pendingRating(context.userId);
-    return { profile, locked: false, drivers, trip, offer, pendingRate };
+    return {
+      profile,
+      locked: false,
+      drivers,
+      trip,
+      offer,
+      pendingRate,
+      roadReports,
+      weather,
+      pendingReviewsCount,
+    };
   });
 
 async function nearby(origin: LatLng | null): Promise<NearbyMoto[]> {
@@ -427,6 +585,9 @@ interface TripRow {
   panic_at: string | Date | null;
   started_at: string | Date | null;
   ridden_m: number | null;
+  cash_tendered?: number | null;
+  payment_proof?: string | null;
+  admin_pay_verified?: boolean | null;
 }
 
 async function tripView(row: TripRow): Promise<TripView> {
@@ -495,6 +656,9 @@ async function tripView(row: TripRow): Promise<TripView> {
     driverBank: driver?.bank_name ?? "",
     driverBankCode: bankObj?.code ?? "",
     driverBankPhone: driver?.bank_phone ?? "",
+    cashTendered: row.cash_tendered == null ? null : Number(row.cash_tendered),
+    paymentProof: row.payment_proof ?? "",
+    adminPayVerified: Boolean(row.admin_pay_verified),
   };
 }
 
@@ -510,17 +674,32 @@ async function activeTrip(userId: string): Promise<TripView | null> {
   return rows[0] ? tripView(rows[0]) : null;
 }
 
+/**
+ * Algoritmo de Match Direto (Modelo "Pesca" / Disparo Simultâneo para os 5 motoristas):
+ * O pedido aberto ('open') é exibido simultaneamente para todos os motoristas livres.
+ * O primeiro que aceitar na tela assume a corrida.
+ */
 async function openOffer(driverId: string): Promise<TripView | null> {
   const sql = await getSql();
-  const now = Date.now();
   const rows = await sql<TripRow>`
     select * from trips
-    where status = 'open' and offer_driver_id = ${driverId}
-    limit 1
+    where status = 'open'
+    order by created_at asc
+    limit 5
   `;
-  const row = rows[0];
-  if (!row || Number(row.offer_until_ms ?? 0) <= now) return null;
-  return tripView(row);
+  const row = rows.find((r) => {
+    const skipped = String(r.offer_skip ?? "")
+      .split(",")
+      .filter(Boolean);
+    return !skipped.includes(driverId);
+  });
+  if (!row) return null;
+  const view = await tripView(row);
+  // Provide a live countdown window so the alert bar pulses for all 5 drivers
+  if (!view.offerUntil || view.offerUntil <= Date.now()) {
+    view.offerUntil = Date.now() + OFFER_MS;
+  }
+  return view;
 }
 
 async function candidates(pickup: LatLng, fare: number) {
@@ -640,6 +819,7 @@ export const requestTrip = createServerFn({ method: "POST" })
     payMethod: string;
     preferredDriverId: string | null;
     serviceTier?: ServiceTierId;
+    cashTendered?: number | null;
   }) => input)
   .handler(async ({ context, data }) => {
     const sql = await getSql();
@@ -665,28 +845,38 @@ export const requestTrip = createServerFn({ method: "POST" })
     const pay =
       data.payMethod === "PAGO_MOVIL"
         ? "PAGO_MOVIL"
-        : data.payMethod === "CASH_VES"
-          ? "CASH_VES"
-          : "CASH_USD";
+        : data.payMethod === "ZELLE_WALLET"
+          ? "ZELLE_WALLET"
+          : data.payMethod === "CASH_VES"
+            ? "CASH_VES"
+            : "CASH_USD";
     const tier = SERVICE_TIERS.find((t) => t.id === data.serviceTier) ?? SERVICE_TIERS[0];
     const baseFare = fareFor(distanceM, premiereAt(dest));
     const totalFare = Math.round((baseFare + tier.extraUsd) * 100) / 100;
+    const cashTendered =
+      typeof data.cashTendered === "number" && data.cashTendered > 0
+        ? Math.round(data.cashTendered * 100) / 100
+        : null;
 
     await sql`
       insert into trips (
         id, passenger_id, preferred_driver_id, status,
         pickup_lat, pickup_lng, pickup_ref, dest_lat, dest_lng, dest_ref,
-        fare_usd, distance_m, pay_method, share_token
+        fare_usd, distance_m, pay_method, share_token, offer_until_ms, cash_tendered
       ) values (
         ${id}, ${context.userId}, ${data.preferredDriverId}, 'open',
         ${pickup.lat}, ${pickup.lng}, ${ref}, ${dest.lat}, ${dest.lng}, ${destRef},
-        ${totalFare}, ${distanceM}, ${pay}, ${share}
+        ${totalFare}, ${distanceM}, ${pay}, ${share}, ${Date.now() + OFFER_MS}, ${cashTendered}
       )
     `;
     await cascadeOffers();
     return { id };
   });
 
+/**
+ * Modelo "Pesca" / Disparo Simultâneo:
+ * Qualquer um dos 5 motoristas aprovados da frota que clicar primeiro assume a corrida.
+ */
 export const acceptTrip = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { tripId: string }) => input)
@@ -698,21 +888,18 @@ export const acceptTrip = createServerFn({ method: "POST" })
     if (me[0]?.role !== "driver" || me[0]?.status !== "approved") {
       throw new Error("Solo un mototaxista aprobado puede aceptar.");
     }
-    const now = Date.now();
     const taken = await sql<{ id: string }>`
       update trips set driver_id = ${context.userId}, status = 'accepted', updated_at = now()
       where id = ${data.tripId} and status = 'open'
-        and offer_driver_id = ${context.userId}
-        and offer_until_ms > ${now}
       returning id
     `;
-    if (!taken[0]) throw new Error("Esa carrera ya la tomó otro mototaxista.");
+    if (!taken[0]) throw new Error("Esa carrera ya la tomó otro mototaxista de la flota.");
     return { ok: true };
   });
 
 export const setTripStatus = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { tripId: string; status: string; payRef?: string }) => input)
+  .validator((input: { tripId: string; status: string; payRef?: string; paymentProof?: string }) => input)
   .handler(async ({ context, data }) => {
     const allowed = ["arrived", "riding", "pay", "done", "cancelled"];
     if (!allowed.includes(data.status)) throw new Error("Estado inválido.");
@@ -734,12 +921,16 @@ export const setTripStatus = createServerFn({ method: "POST" })
       if (!["open", "accepted"].includes(trip.status)) throw new Error("Ya no se puede cancelar.");
     }
     if (["arrived", "riding", "pay"].includes(data.status) && trip.driver_id !== context.userId) {
-      throw new Error("Eso lo marca el mototaxista.");
+      // Allow passenger to submit payRef or paymentProof while in 'pay' or 'riding'
+      if (!(data.status === "pay" && trip.passenger_id === context.userId)) {
+        throw new Error("Eso lo marca el mototaxista.");
+      }
     }
-    if (data.status === "done" && trip.driver_id !== context.userId) {
+    if (data.status === "done" && trip.driver_id !== context.userId && trip.passenger_id !== context.userId) {
       throw new Error("El cobro y cierre de la carrera lo confirma el mototaxista.");
     }
-    const payRef = (data.payRef ?? "").replace(/\D/g, "").slice(0, 6);
+    const payRef = (data.payRef ?? "").replace(/\D/g, "").slice(0, 12);
+    const proof = data.paymentProof ? photoOk(data.paymentProof, false) : null;
     const commission =
       data.status === "done" ? Math.round(Number(trip.fare_usd) * COMMISSION * 100) / 100 : 0;
     if (data.status === "done" && trip.driver_id) {
@@ -752,9 +943,10 @@ export const setTripStatus = createServerFn({ method: "POST" })
         status = ${data.status},
         commission_usd = case when ${data.status} = 'done' then ${commission} else commission_usd end,
         pay_ref = case when ${payRef} = '' then pay_ref else ${payRef} end,
+        payment_proof = case when ${proof} is null then payment_proof else ${proof} end,
         pay_status = case
           when ${data.status} = 'done' then 'PAID'
-          when ${payRef} <> '' then 'VERIFYING'
+          when ${payRef} <> '' or ${proof} is not null then 'VERIFYING'
           else pay_status
         end,
         started_at = case
@@ -780,6 +972,9 @@ export interface ReviewItem {
   cedulaPhoto: string;
   selfie: string;
   circulationPhoto: string;
+  licenseGrade: string;
+  medicalCert: boolean;
+  criminalRecordOk: boolean;
 }
 
 export const reviewList = createServerFn({ method: "POST" })
@@ -804,6 +999,9 @@ export const reviewList = createServerFn({ method: "POST" })
       cedulaPhoto: row.cedula_photo ?? "",
       selfie: row.selfie ?? "",
       circulationPhoto: row.circulation_photo ?? "",
+      licenseGrade: row.license_grade ?? "2da Grado (Moto)",
+      medicalCert: row.medical_cert ?? true,
+      criminalRecordOk: row.criminal_record_ok ?? true,
     }));
   });
 
@@ -813,11 +1011,16 @@ export const reviewDecide = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     assertReview(data.key);
     const sql = await getSql();
+    const targetRows = await sql<ProfileRow>`
+      select * from profiles where user_id = ${data.userId} limit 1
+    `;
+    const target = targetRows[0];
     if (data.approve) {
       await sql`
         update profiles set
           status = 'approved',
           elite = case when role = 'driver' then true else ${Boolean(data.elite)} end,
+          in_person_verified = true,
           reject_note = ''
         where user_id = ${data.userId} and status = 'pending'
       `;
@@ -827,6 +1030,28 @@ export const reviewDecide = createServerFn({ method: "POST" })
         where user_id = ${data.userId} and status = 'pending'
       `;
     }
+    if (target) {
+      await notifyDeveloper(
+        [
+          data.approve
+            ? "✅ APROBACIÓN DEL DESARROLLADOR CONFIRMADA — Rapidez Carora"
+            : "❌ EXPEDIENTE RECHAZADO POR DESARROLLADOR — Rapidez Carora",
+          `Correo Desarrollador: ${DEVELOPER_EMAIL}`,
+          `Usuario: ${target.full_name} (${target.cedula})`,
+          `Teléfono: ${target.phone}`,
+          `Rol: ${target.role === "driver" ? "Mototaxista (Frota 5)" : "Pasajero (MVP 15)"}`,
+          target.role === "driver" ? `Moto: ${target.model ?? ""} · Placa: ${target.plate ?? ""}` : "",
+          data.approve
+            ? "Estado: APROBADO y habilitado para operar en Carora."
+            : `Motivo rechazo: ${data.note.trim() || "Corregir documentos"}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        data.approve
+          ? `[Rapidez Carora] Aprobado: ${target.full_name} (${target.cedula})`
+          : `[Rapidez Carora] Rechazado: ${target.full_name} (${target.cedula})`,
+      );
+    }
     return { ok: true };
   });
 
@@ -834,6 +1059,7 @@ export interface ChatLine {
   id: string;
   body: string;
   mine: boolean;
+  attachmentPhoto: string;
 }
 
 export const listChat = createServerFn({ method: "POST" })
@@ -848,40 +1074,68 @@ export const listChat = createServerFn({ method: "POST" })
         and (passenger_id = ${context.userId} or driver_id = ${context.userId})
     `;
     if (!trip[0]) return [];
-    const rows = await sql<{ id: string; from_user: string; body: string }>`
-      select id, from_user, body from messages where trip_id = ${data.tripId} order by created_at asc limit 40
+    const rows = await sql<{ id: string; from_user: string; body: string; attachment_photo: string | null }>`
+      select id, from_user, body, attachment_photo from messages where trip_id = ${data.tripId} order by created_at asc limit 40
     `;
-    return rows.map((row) => ({ id: row.id, body: row.body, mine: row.from_user === context.userId }));
+    return rows.map((row) => ({
+      id: row.id,
+      body: row.body,
+      mine: row.from_user === context.userId,
+      attachmentPhoto: row.attachment_photo ?? "",
+    }));
   });
 
 export const sendChat = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { tripId: string; body: string }) => input)
+  .validator((input: { tripId: string; body: string; attachmentPhoto?: string }) => input)
   .handler(async ({ context, data }) => {
-    const body = data.body.trim().slice(0, 140);
-    if (body.length < 1) throw new Error("Escribe el mensaje.");
+    const photo = data.attachmentPhoto
+      ? photoOk(data.attachmentPhoto, false, "Captura de comprobante inválida.")
+      : null;
+    const body =
+      data.body.trim().slice(0, 140) ||
+      (photo ? "📎 Comprobante de pago (Zelle / Billetera Digital)" : "");
+    if (body.length < 1 && !photo) throw new Error("Escribe el mensaje o adjunta el comprobante.");
     const sql = await getSql();
     const trip = await sql<{ id: string }>`
       select id from trips
       where id = ${data.tripId}
-        and status in ('accepted', 'arrived', 'riding')
+        and status in ('accepted', 'arrived', 'riding', 'pay')
         and (passenger_id = ${context.userId} or driver_id = ${context.userId})
     `;
     if (!trip[0]) throw new Error("Esa carrera no tiene chat.");
     await sql`
-      insert into messages (id, trip_id, from_user, body)
-      values (${`m_${crypto.randomUUID()}`}, ${data.tripId}, ${context.userId}, ${body})
+      insert into messages (id, trip_id, from_user, body, attachment_photo)
+      values (${`m_${crypto.randomUUID()}`}, ${data.tripId}, ${context.userId}, ${body}, ${photo})
     `;
+    if (photo) {
+      await sql`
+        update trips
+        set payment_proof = ${photo},
+            pay_status = case when pay_status = 'PAID' then 'PAID' else 'VERIFYING' end,
+            updated_at = now()
+        where id = ${data.tripId}
+      `;
+    }
     return { ok: true };
   });
 
 export interface FleetDriver {
   userId: string;
   fullName: string;
+  phone: string;
   cedula: string;
   plate: string;
   model: string;
   status: "approved" | "blocked";
+  liveState: "free" | "on_trip" | "offline";
+  sector: string;
+  hotspotId: string;
+  licenseGrade: string;
+  medicalCert: boolean;
+  criminalRecordOk: boolean;
+  inPersonVerified: boolean;
+  saldoUsd: number;
 }
 
 export const fleetList = createServerFn({ method: "POST" })
@@ -893,24 +1147,66 @@ export const fleetList = createServerFn({ method: "POST" })
     const rows = await sql<{
       user_id: string;
       full_name: string;
+      phone: string;
       cedula: string;
       plate: string | null;
       model: string | null;
       status: string;
+      hotspot_id: string | null;
+      license_grade: string | null;
+      medical_cert: boolean | null;
+      criminal_record_ok: boolean | null;
+      in_person_verified: boolean | null;
+      saldo_usd: number | null;
+      lat: number | null;
+      lng: number | null;
+      online: boolean | null;
+      pos_updated_at: string | Date | null;
+      active_trip_id: string | null;
     }>`
-      select user_id, full_name, cedula, plate, model, status
-      from profiles
-      where role = 'driver' and status in ('approved', 'blocked')
-      order by full_name asc
+      select
+        p.user_id, p.full_name, p.phone, p.cedula, p.plate, p.model, p.status,
+        p.hotspot_id, p.license_grade, p.medical_cert, p.criminal_record_ok, p.in_person_verified, p.saldo_usd,
+        pos.lat, pos.lng, pos.online, pos.updated_at as pos_updated_at,
+        (select t.id from trips t where t.driver_id = p.user_id and t.status in ('accepted', 'arrived', 'riding', 'pay') limit 1) as active_trip_id
+      from profiles p
+      left join positions pos on pos.user_id = p.user_id
+      where p.role = 'driver' and p.status in ('approved', 'blocked')
+      order by p.full_name asc
     `;
-    return rows.map((row) => ({
-      userId: row.user_id,
-      fullName: row.full_name,
-      cedula: row.cedula,
-      plate: row.plate ?? "",
-      model: row.model ?? "",
-      status: row.status === "blocked" ? "blocked" : "approved",
-    }));
+    const now = Date.now();
+    return rows.map((row) => {
+      const isFresh =
+        Boolean(row.online) &&
+        row.pos_updated_at != null &&
+        now - new Date(row.pos_updated_at).getTime() < FRESH_MS;
+      const liveState: "free" | "on_trip" | "offline" = row.active_trip_id
+        ? "on_trip"
+        : isFresh
+          ? "free"
+          : "offline";
+      const sector =
+        row.lat != null && row.lng != null
+          ? placeLabel({ lat: Number(row.lat), lng: Number(row.lng) })
+          : "Sin señal GPS";
+      return {
+        userId: row.user_id,
+        fullName: row.full_name,
+        phone: row.phone,
+        cedula: row.cedula,
+        plate: row.plate ?? "",
+        model: row.model ?? "",
+        status: row.status === "blocked" ? "blocked" : "approved",
+        liveState,
+        sector,
+        hotspotId: row.hotspot_id ?? "hotspot-centro",
+        licenseGrade: row.license_grade ?? "2da Grado (Moto)",
+        medicalCert: row.medical_cert ?? true,
+        criminalRecordOk: row.criminal_record_ok ?? true,
+        inPersonVerified: Boolean(row.in_person_verified),
+        saldoUsd: Number(row.saldo_usd ?? 0),
+      };
+    });
   });
 
 export const setFleetState = createServerFn({ method: "POST" })
@@ -935,9 +1231,16 @@ export const declineTrip = createServerFn({ method: "POST" })
   .validator((input: { tripId: string }) => input)
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    const rows = await sql<{ offer_skip: string | null }>`
+      select offer_skip from trips where id = ${data.tripId} limit 1
+    `;
+    const skip = String(rows[0]?.offer_skip ?? "")
+      .split(",")
+      .filter(Boolean);
+    const nextSkip = [...new Set([...skip, context.userId])].join(",");
     await sql`
-      update trips set offer_until_ms = 0
-      where id = ${data.tripId} and status = 'open' and offer_driver_id = ${context.userId}
+      update trips set offer_skip = ${nextSkip}, offer_until_ms = 0
+      where id = ${data.tripId} and status = 'open'
     `;
     await cascadeOffers();
     return { ok: true };
@@ -1060,6 +1363,10 @@ export interface AuditTrip {
   dest: string;
   fareUsd: number;
   status: string;
+  payMethod: string;
+  payRef: string;
+  paymentProof: string;
+  adminPayVerified: boolean;
   when: string;
 }
 
@@ -1067,78 +1374,241 @@ export interface OpsMetrics {
   done: number;
   cancelled: number;
   open: number;
+  driversApproved: number;
+  passengersApproved: number;
+}
+
+export interface MvpFeedbackItem {
+  id: string;
+  authorName: string;
+  role: string;
+  category: string;
+  body: string;
+  when: string;
 }
 
 export const opsBoard = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { key: string }) => input)
-  .handler(async ({ data }): Promise<{ panics: PanicItem[]; week: WeekItem[]; metrics: OpsMetrics; trips: AuditTrip[] }> => {
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      panics: PanicItem[];
+      week: WeekItem[];
+      metrics: OpsMetrics;
+      trips: AuditTrip[];
+      feedbacks: MvpFeedbackItem[];
+    }> => {
+      assertReview(data.key);
+      const sql = await getSql();
+      const panics = await sql<{
+        id: string;
+        full_name: string;
+        phone: string;
+        pickup_ref: string;
+        dest_ref: string | null;
+      }>`
+        select t.id, p.full_name, p.phone, t.pickup_ref, t.dest_ref
+        from trips t
+        join profiles p on p.user_id = t.passenger_id
+        where t.panic_at is not null and t.status in ('accepted', 'arrived', 'riding')
+        order by t.panic_at desc
+        limit 8
+      `;
+      const week = await sql<{
+        full_name: string;
+        cedula: string;
+        saldo_usd: number;
+        week_usd: number;
+      }>`
+        select p.full_name, p.cedula, p.saldo_usd,
+          (select coalesce(sum(t.commission_usd), 0) from trips t
+            where t.driver_id = p.user_id and t.status = 'done'
+              and t.updated_at > now() - interval '7 days') as week_usd
+        from profiles p
+        where p.role = 'driver' and p.status = 'approved'
+        order by p.full_name
+      `;
+      const counts = await sql<{ done: number; cancelled: number; open: number }>`
+        select
+          count(*) filter (where status = 'done')::int as done,
+          count(*) filter (where status = 'cancelled')::int as cancelled,
+          count(*) filter (where status in ('open', 'accepted', 'arrived', 'riding', 'pay'))::int as open
+        from trips
+      `;
+      const userCounts = await sql<{ drivers: number; passengers: number }>`
+        select
+          count(*) filter (where role = 'driver' and status = 'approved')::int as drivers,
+          count(*) filter (where role = 'passenger' and status = 'approved')::int as passengers
+        from profiles
+      `;
+      const recent = await sql<{
+        id: string;
+        dest_ref: string | null;
+        fare_usd: number;
+        status: string;
+        pay_method: string;
+        pay_ref: string | null;
+        payment_proof: string | null;
+        admin_pay_verified: boolean | null;
+        updated_at: string | Date;
+      }>`
+        select id, dest_ref, fare_usd, status, pay_method, pay_ref, payment_proof, admin_pay_verified, updated_at
+        from trips
+        where status in ('done', 'cancelled', 'open', 'accepted', 'riding', 'pay')
+        order by updated_at desc
+        limit 10
+      `;
+      const fbRows = await sql<{
+        id: string;
+        author_name: string;
+        role: string;
+        category: string;
+        body: string;
+        created_at: string | Date;
+      }>`
+        select id, author_name, role, category, body, created_at
+        from mvp_feedback
+        order by created_at desc
+        limit 15
+      `;
+      const tally = counts[0];
+      const uTally = userCounts[0];
+      return {
+        panics: panics.map((row) => ({
+          id: row.id,
+          who: row.full_name,
+          phone: row.phone,
+          pickup: row.pickup_ref,
+          dest: row.dest_ref ?? "",
+        })),
+        week: week.map((row) => ({
+          name: row.full_name,
+          cedula: row.cedula,
+          saldo: Number(row.saldo_usd),
+          commission: Number(row.week_usd),
+        })),
+        metrics: {
+          done: Number(tally?.done ?? 0),
+          cancelled: Number(tally?.cancelled ?? 0),
+          open: Number(tally?.open ?? 0),
+          driversApproved: Number(uTally?.drivers ?? 0),
+          passengersApproved: Number(uTally?.passengers ?? 0),
+        },
+        trips: recent.map((row) => ({
+          id: row.id,
+          dest: row.dest_ref || "Carora",
+          fareUsd: Number(row.fare_usd),
+          status: row.status,
+          payMethod: row.pay_method,
+          payRef: row.pay_ref ?? "",
+          paymentProof: row.payment_proof ?? "",
+          adminPayVerified: Boolean(row.admin_pay_verified),
+          when: new Date(row.updated_at).toLocaleString("es-VE", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "short",
+          }),
+        })),
+        feedbacks: fbRows.map((f) => ({
+          id: f.id,
+          authorName: f.author_name,
+          role: f.role,
+          category: f.category,
+          body: f.body,
+          when: new Date(f.created_at).toLocaleString("es-VE", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "short",
+          }),
+        })),
+      };
+    },
+  );
+
+export const verifyTripPayment = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { key: string; tripId: string }) => input)
+  .handler(async ({ data }) => {
     assertReview(data.key);
     const sql = await getSql();
-    const panics = await sql<{ id: string; full_name: string; phone: string; pickup_ref: string; dest_ref: string | null }>`
-      select t.id, p.full_name, p.phone, t.pickup_ref, t.dest_ref
-      from trips t
-      join profiles p on p.user_id = t.passenger_id
-      where t.panic_at is not null and t.status in ('accepted', 'arrived', 'riding')
-      order by t.panic_at desc
-      limit 8
+    await sql`
+      update trips
+      set admin_pay_verified = true,
+          pay_status = 'PAID',
+          updated_at = now()
+      where id = ${data.tripId}
     `;
-    const week = await sql<{ full_name: string; cedula: string; saldo_usd: number; week_usd: number }>`
-      select p.full_name, p.cedula, p.saldo_usd,
-        (select coalesce(sum(t.commission_usd), 0) from trips t
-          where t.driver_id = p.user_id and t.status = 'done'
-            and t.updated_at > now() - interval '7 days') as week_usd
-      from profiles p
-      where p.role = 'driver' and p.status = 'approved'
-      order by p.full_name
+    return { ok: true };
+  });
+
+export const setDriverHotspot = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { hotspotId: string; lat: number; lng: number }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await sql`
+      update profiles set hotspot_id = ${data.hotspotId}
+      where user_id = ${context.userId} and role = 'driver'
     `;
-    const counts = await sql<{ done: number; cancelled: number; open: number }>`
-      select
-        count(*) filter (where status = 'done')::int as done,
-        count(*) filter (where status = 'cancelled')::int as cancelled,
-        count(*) filter (where status = 'open')::int as open
-      from trips
+    await sql`
+      insert into positions (user_id, lat, lng, online, updated_at)
+      values (${context.userId}, ${data.lat}, ${data.lng}, true, now())
+      on conflict (user_id) do update set
+        lat = excluded.lat, lng = excluded.lng, online = true, updated_at = now()
     `;
-    const recent = await sql<{ id: string; dest_ref: string | null; fare_usd: number; status: string; updated_at: string | Date }>`
-      select id, dest_ref, fare_usd, status, updated_at
-      from trips
-      where status in ('done', 'cancelled', 'open', 'accepted', 'riding')
-      order by updated_at desc
-      limit 8
+    return { ok: true };
+  });
+
+export const submitMvpFeedback = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { category: string; body: string }) => input)
+  .handler(async ({ context, data }) => {
+    const body = data.body.trim().slice(0, 600);
+    if (body.length < 2) throw new Error("Describe brevemente tu reporte o sugerencia.");
+    const sql = await getSql();
+    const prof = await sql<{ full_name: string; role: string }>`
+      select full_name, role from profiles where user_id = ${context.userId} limit 1
     `;
-    const tally = counts[0];
-    return {
-      panics: panics.map((row) => ({
-        id: row.id,
-        who: row.full_name,
-        phone: row.phone,
-        pickup: row.pickup_ref,
-        dest: row.dest_ref ?? "",
-      })),
-      week: week.map((row) => ({
-        name: row.full_name,
-        cedula: row.cedula,
-        saldo: Number(row.saldo_usd),
-        commission: Number(row.week_usd),
-      })),
-      metrics: {
-        done: Number(tally?.done ?? 0),
-        cancelled: Number(tally?.cancelled ?? 0),
-        open: Number(tally?.open ?? 0),
-      },
-      trips: recent.map((row) => ({
-        id: row.id,
-        dest: row.dest_ref || "Carora",
-        fareUsd: Number(row.fare_usd),
-        status: row.status,
-        when: new Date(row.updated_at).toLocaleString("es-VE", {
-          hour: "2-digit",
-          minute: "2-digit",
-          day: "2-digit",
-          month: "short",
-        }),
-      })),
-    };
+    const authorName = prof[0]?.full_name || "Usuario MVP Carora";
+    const role = prof[0]?.role || "passenger";
+    const category = data.category.trim().slice(0, 40) || "Feedback Mejoras";
+    await sql`
+      insert into mvp_feedback (id, user_id, author_name, role, category, body)
+      values (${`fb_${crypto.randomUUID()}`}, ${context.userId}, ${authorName}, ${role}, ${category}, ${body})
+    `;
+    await notifyDeveloper(
+      [
+        "💬 NUEVO FEEDBACK DE MEJORAS — Rapidez Carora",
+        `Autor: ${authorName} (${role})`,
+        `Categoría: ${category}`,
+        "",
+        body,
+      ].join("\n"),
+      `[Rapidez Carora] Feedback de ${authorName}`,
+    );
+    return { ok: true };
+  });
+
+export const savePushSubscription = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { endpoint: string; p256dh?: string; auth?: string; userAgent?: string }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await sql`
+      insert into push_subscriptions (user_id, endpoint, p256dh, auth, user_agent, updated_at)
+      values (${context.userId}, ${data.endpoint}, ${data.p256dh ?? null}, ${data.auth ?? null}, ${data.userAgent ?? null}, now())
+      on conflict (endpoint) do update set
+        user_id = excluded.user_id,
+        p256dh = excluded.p256dh,
+        auth = excluded.auth,
+        user_agent = excluded.user_agent,
+        updated_at = now()
+    `;
+    return { ok: true };
   });
 
 export const topUp = createServerFn({ method: "POST" })
@@ -1190,3 +1660,231 @@ export const sharedTrip = createServerFn({ method: "GET" })
       lng: view.driverLng,
     };
   });
+
+let cachedMeteo: {
+  at: number;
+  tempC: number;
+  rainMm: number;
+  windKmh: number;
+  isRaining: boolean;
+  conditionLabel: string;
+} | null = null;
+
+async function fetchOpenMeteoCarora() {
+  const now = Date.now();
+  if (cachedMeteo && now - cachedMeteo.at < 300_000) {
+    return cachedMeteo;
+  }
+  try {
+    const res = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=10.178&longitude=-70.082&current=temperature_2m,precipitation,rain,weather_code,wind_speed_10m&timezone=America%2FCaracas",
+      { signal: AbortSignal.timeout(3500) },
+    );
+    if (!res.ok) throw new Error("weather status");
+    const json = (await res.json()) as {
+      current?: {
+        temperature_2m?: number;
+        precipitation?: number;
+        rain?: number;
+        weather_code?: number;
+        wind_speed_10m?: number;
+      };
+    };
+    const c = json.current ?? {};
+    const tempC = Math.round(Number(c.temperature_2m ?? 31));
+    const rainMm = Number(c.rain ?? c.precipitation ?? 0);
+    const code = Number(c.weather_code ?? 0);
+    const windKmh = Math.round(Number(c.wind_speed_10m ?? 12));
+    const isRaining = rainMm > 0.1 || (code >= 51 && code <= 99);
+    const conditionLabel = isRaining
+      ? code >= 95
+        ? "Tormenta eléctrica en Carora"
+        : "Lluvia activa en Carora"
+      : code >= 1 && code <= 3
+        ? "Parcialmente nublado · Carora"
+        : "Cielo despejado · Carora";
+    cachedMeteo = { at: now, tempC, rainMm, windKmh, isRaining, conditionLabel };
+    return cachedMeteo;
+  } catch {
+    return (
+      cachedMeteo ?? {
+        at: now,
+        tempC: 32,
+        rainMm: 0,
+        windKmh: 14,
+        isRaining: false,
+        conditionLabel: "Clima cálido · Carora",
+      }
+    );
+  }
+}
+
+async function activeRoadReports(): Promise<LiveRoadReport[]> {
+  const sql = await getSql();
+  const rows = await sql<{
+    id: string;
+    kind: string;
+    label: string;
+    sector: string;
+    author_name: string;
+    lat: number;
+    lng: number;
+    upvotes: number;
+    created_at: string | Date;
+  }>`
+    select id, kind, label, sector, author_name, lat, lng, upvotes, created_at
+    from road_reports
+    where expires_at > now() and upvotes > 0
+    order by created_at desc
+    limit 25
+  `;
+  return rows.map((r) => ({
+    id: r.id,
+    kind:
+      r.kind === "lluvia_anegado" ||
+      r.kind === "trafico_cierre" ||
+      r.kind === "alcabala_operativo"
+        ? r.kind
+        : "lombada_hueco",
+    label: r.label,
+    sector: r.sector,
+    authorName: r.author_name,
+    lat: Number(r.lat),
+    lng: Number(r.lng),
+    upvotes: Number(r.upvotes),
+    when: new Date(r.created_at).toLocaleTimeString("es-VE", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  }));
+}
+
+async function currentCaroraWeather(reports: LiveRoadReport[]): Promise<CityWeatherState> {
+  const sql = await getSql();
+  const rows = await sql<{ rain_mode: boolean; advisory: string; delay_min: number }>`
+    select rain_mode, advisory, delay_min from city_weather where id = 1 limit 1
+  `;
+  const dbWeather = rows[0];
+  const meteo = await fetchOpenMeteoCarora();
+  const rainReports = reports.filter((r) => r.kind === "lluvia_anegado");
+  const isRaining =
+    Boolean(dbWeather?.rain_mode) || meteo.isRaining || rainReports.length > 0;
+  const delayMin = isRaining
+    ? Math.max(
+        Number(dbWeather?.delay_min ?? 0),
+        3 + Math.min(5, rainReports.length * 2),
+      )
+    : 0;
+  const advisory = isRaining
+    ? dbWeather?.advisory?.trim() ||
+      (rainReports.length > 0
+        ? `Alerta por lluvia y calles anegadas en ${rainReports[0].sector}. Precaución en Quebrada de Carora, Río Morere y Av. Miranda (+${delayMin} min de retraso estimado).`
+        : `Lluvia activa en Carora. Pavimento húmedo y precaución en pasos de quebrada (+${delayMin} min por seguridad).`)
+    : dbWeather?.advisory?.trim() || "";
+
+  return {
+    tempC: meteo.tempC,
+    isRaining,
+    rainMm: meteo.rainMm,
+    windKmh: meteo.windKmh,
+    advisory,
+    delayMin,
+    conditionLabel: isRaining ? "Alerta de Lluvia · Carora" : meteo.conditionLabel,
+  };
+}
+
+export const submitRoadReport = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: {
+    kind: "lombada_hueco" | "lluvia_anegado" | "trafico_cierre" | "alcabala_operativo";
+    label: string;
+    lat: number;
+    lng: number;
+  }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const prof = await sql<{ full_name: string }>`
+      select full_name from profiles where user_id = ${context.userId} limit 1
+    `;
+    const authorName = prof[0]?.full_name?.split(" ")[0] || "Vecino Carora";
+    const lat = Number(data.lat);
+    const lng = Number(data.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("Ubicación GPS inválida.");
+    }
+    const sector = placeLabel({ lat, lng });
+    const defaultLabels: Record<typeof data.kind, string> = {
+      lombada_hueco: "Lombada pronunciada / Hueco en la vía",
+      lluvia_anegado: "Calle anegada por lluvia / Corriente de agua",
+      trafico_cierre: "Retraso por tránsito pesado / Vía cerrada",
+      alcabala_operativo: "Punto de control / Reducir velocidad",
+    };
+    const label = data.label.trim().slice(0, 120) || defaultLabels[data.kind];
+    const id = `rr_${crypto.randomUUID()}`;
+
+    await sql`
+      insert into road_reports (id, user_id, author_name, kind, label, sector, lat, lng, upvotes)
+      values (${id}, ${context.userId}, ${authorName}, ${data.kind}, ${label}, ${sector}, ${lat}, ${lng}, 1)
+    `;
+
+    if (data.kind === "lluvia_anegado") {
+      await sql`
+        update city_weather
+        set rain_mode = true,
+            delay_min = greatest(delay_min, 4),
+            advisory = ${`Lluvia y vía anegada reportada en ${sector}. Precaución en áreas críticas y quebradas.`},
+            updated_at = now()
+        where id = 1
+      `;
+    }
+    return { ok: true, id };
+  });
+
+export const voteRoadReport = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { reportId: string; delta: 1 | -1 }) => input)
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    if (data.delta > 0) {
+      await sql`
+        update road_reports
+        set upvotes = upvotes + 1,
+            expires_at = greatest(expires_at, now() + interval '2 hours')
+        where id = ${data.reportId}
+      `;
+    } else {
+      await sql`
+        update road_reports
+        set upvotes = upvotes - 1
+        where id = ${data.reportId}
+      `;
+    }
+    return { ok: true };
+  });
+
+export const setCityWeather = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { rainMode: boolean; advisory?: string; delayMin?: number }) => input)
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    const delayMin = data.rainMode ? Math.max(3, Math.min(15, Number(data.delayMin ?? 4))) : 0;
+    const advisory = data.rainMode
+      ? data.advisory?.trim() ||
+        "Alerta de lluvia en Carora: precaución en Quebrada de Carora, Río Morere y Av. Francisco de Miranda. Retrasos estimados de 3 a 6 min."
+      : "";
+    await sql`
+      update city_weather
+      set rain_mode = ${Boolean(data.rainMode)},
+          advisory = ${advisory},
+          delay_min = ${delayMin},
+          updated_at = now()
+      where id = 1
+    `;
+    if (!data.rainMode) {
+      await sql`
+        delete from road_reports where kind = 'lluvia_anegado'
+      `;
+    }
+    return { ok: true };
+  });
+

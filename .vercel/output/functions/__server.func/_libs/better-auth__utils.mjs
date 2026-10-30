@@ -1,7 +1,7 @@
 import { H as base64Url, V as base64 } from "./@better-auth/core+[...].mjs";
 import { r as getWebcryptoSubtle } from "./@better-auth/telemetry+[...].mjs";
 import { randomBytes, scrypt } from "node:crypto";
-//#region node_modules/@better-auth/utils/dist/password.node.mjs
+// node_modules/@better-auth/utils/dist/password.node.mjs
 var config = {
 	N: 16384,
 	r: 16,
@@ -30,8 +30,7 @@ async function verifyPassword(hash, password) {
 	if (!salt || !key) throw new Error("Invalid password hash");
 	return (await generateKey(password, salt)).toString("hex") === key;
 }
-//#endregion
-//#region node_modules/@better-auth/utils/dist/binary.mjs
+// node_modules/@better-auth/utils/dist/binary.mjs
 var decoders = /* @__PURE__ */ new Map();
 var binary = {
 	decode: (data, encoding = "utf-8") => {
@@ -40,8 +39,7 @@ var binary = {
 	},
 	encode: new TextEncoder().encode
 };
-//#endregion
-//#region node_modules/@better-auth/utils/dist/hex.mjs
+// node_modules/@better-auth/utils/dist/hex.mjs
 var hexadecimal = "0123456789abcdef";
 var hex = {
 	encode: (data) => {
@@ -64,8 +62,7 @@ var hex = {
 		return new TextDecoder().decode(data);
 	}
 };
-//#endregion
-//#region node_modules/@better-auth/utils/dist/hmac.mjs
+// node_modules/@better-auth/utils/dist/hmac.mjs
 var createHMAC = (algorithm = "SHA-256", encoding = "none") => {
 	const hmac = {
 		importKey: async (key, keyUsage) => {
@@ -90,5 +87,4 @@ var createHMAC = (algorithm = "SHA-256", encoding = "none") => {
 	};
 	return hmac;
 };
-//#endregion
 export { verifyPassword as i, binary as n, hashPassword as r, createHMAC as t };

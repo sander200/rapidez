@@ -1,4 +1,4 @@
-//#region node_modules/nanostores/atom/index.js
+// node_modules/nanostores/atom/index.js
 var listenerQueue = [];
 var lqIndex = 0;
 var batchSeen = null;
@@ -10,6 +10,11 @@ var drainQueue = () => {
 	while (lqIndex < listenerQueue.length) {
 		i = lqIndex;
 		lqIndex += QUEUE_ITEMS_PER_LISTENER;
+		let pendingStores = batchSeen?.get(listenerQueue[i]);
+		if (pendingStores) {
+			if (!pendingStores.has(listenerQueue[i + 1])) continue;
+			pendingStores.clear();
+		}
 		try {
 			listenerQueue[i](listenerQueue[i + 1].value, listenerQueue[i + 2], listenerQueue[i + 3]);
 		} catch (e) {
@@ -32,7 +37,8 @@ var atom = /* @__NO_SIDE_EFFECTS__ */ (initialValue) => {
 		listen(listener) {
 			$atom.lc = listeners.push(listener);
 			return () => {
-				for (let i = lqIndex; i < listenerQueue.length;) if (listenerQueue[i] === listener) listenerQueue.splice(i, QUEUE_ITEMS_PER_LISTENER);
+				batchSeen?.get(listener)?.delete($atom);
+				for (let i = lqIndex; i < listenerQueue.length;) if (listenerQueue[i] === listener && listenerQueue[i + 1] === $atom) listenerQueue.splice(i, QUEUE_ITEMS_PER_LISTENER);
 				else i += QUEUE_ITEMS_PER_LISTENER;
 				let index = listeners.indexOf(listener);
 				if (~index) {
@@ -45,8 +51,12 @@ var atom = /* @__NO_SIDE_EFFECTS__ */ (initialValue) => {
 			nanostoresGlobal.epoch++;
 			let runListenerQueue = !listenerQueue.length && !batchSeen;
 			for (let listener of listeners) {
-				if (batchSeen?.has(listener)) continue;
-				batchSeen?.add(listener);
+				if (batchSeen) {
+					let pendingStores = batchSeen.get(listener);
+					if (!pendingStores) batchSeen.set(listener, pendingStores = /* @__PURE__ */ new Set());
+					if (pendingStores.has($atom)) continue;
+					pendingStores.add($atom);
+				}
 				listenerQueue.push(listener, $atom, oldValue, batchSeen ? void 0 : changedKey);
 			}
 			if (runListenerQueue) drainQueue();
@@ -68,8 +78,7 @@ var atom = /* @__NO_SIDE_EFFECTS__ */ (initialValue) => {
 	};
 	return $atom;
 };
-//#endregion
-//#region node_modules/nanostores/lifecycle/index.js
+// node_modules/nanostores/lifecycle/index.js
 var SET = 2;
 var MOUNT = 5;
 var UNMOUNT = 6;
@@ -163,8 +172,7 @@ var onMount = ($store, initialize) => {
 		};
 	});
 };
-//#endregion
-//#region node_modules/nanostores/deep-map/path.js
+// node_modules/nanostores/deep-map/path.js
 function getPath(obj, path) {
 	let allKeys = getAllKeysFromPath(path);
 	let res = obj;
@@ -185,13 +193,12 @@ function getKeyAndIndicesFromKey(key) {
 	}
 	return [key];
 }
-//#endregion
-//#region node_modules/nanostores/listen-keys/index.js
+// node_modules/nanostores/listen-keys/index.js
 function listenKeys($store, keys, listener) {
 	let keysSet = new Set(keys);
 	return $store.listen((value, oldValue, changed) => {
-		if (changed === void 0 ? keys.some((key) => oldValue === void 0 || value[key] !== oldValue[key] || getPath(value, key) !== getPath(oldValue, key)) : keysSet.has(changed) || keysSet.has(changed.split(/\.|\[/)[0])) listener(value, oldValue, changed);
+		let pathChanged = (key) => !Object.is(getPath(value, key), getPath(oldValue, key));
+		if (changed === void 0 ? keys.some((key) => oldValue === void 0 || ($store.eqKey ? !$store.eqKey(oldValue[key], value[key], key) : pathChanged(key))) : keysSet.has(changed) || typeof changed === "string" && (keysSet.has(changed.split(/\.|\[/)[0]) || !$store.eqKey && oldValue !== void 0 && keys.some(pathChanged))) listener(value, oldValue, changed);
 	});
 }
-//#endregion
 export { atom as a, onSet as i, STORE_UNMOUNT_DELAY as n, onMount as r, listenKeys as t };

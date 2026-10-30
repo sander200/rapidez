@@ -1,5 +1,5 @@
 import { a as toRequest, n as HTTPError } from "../_libs/h3+rou3+srvx.mjs";
-//#region #nitro/virtual/vite-services
+// #nitro/virtual/vite-services
 function lazyService(loader) {
 	let promise, mod;
 	return { fetch(req) {
@@ -8,19 +8,16 @@ function lazyService(loader) {
 		return promise.then((mod) => mod.fetch(req));
 	} };
 }
-var viteServices = { ["ssr"]: lazyService(() => import("../_ssr/ssr.mjs").then((n) => n.c)) };
-//#endregion
-//#region node_modules/nitro/dist/runtime/vite.mjs
+var viteServices = { ["ssr"]: lazyService(() => import("../_ssr/ssr.mjs").then((n) => n.s)) };
+// node_modules/nitro/dist/runtime/vite.mjs
 function fetchViteEnv(viteEnvName, input, init) {
 	const viteEnv = viteServices[viteEnvName];
 	if (!viteEnv) throw HTTPError.status(404);
 	return Promise.resolve(viteEnv.fetch(toRequest(input, init)));
 }
-//#endregion
-//#region node_modules/nitro/dist/runtime/internal/vite/ssr-renderer.mjs
+// node_modules/nitro/dist/runtime/internal/vite/ssr-renderer.mjs
 /** @param {{ req: Request }} HTTPEvent */
 function ssrRenderer({ req }) {
 	return fetchViteEnv("ssr", req);
 }
-//#endregion
 export { ssrRenderer as default };

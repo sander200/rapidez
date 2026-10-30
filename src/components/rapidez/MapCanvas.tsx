@@ -1,7 +1,7 @@
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
 import type { Map as LeafletMap, LayerGroup, Marker, Polyline } from "leaflet";
-import { HOME } from "@/lib/rapidez/data";
+import { CARORA_HOTSPOTS, CARORA_ROAD_NODES, HOME } from "@/lib/rapidez/data";
 import { bearing } from "@/lib/rapidez/geo";
 import { useRapidez } from "@/lib/rapidez/store";
 
@@ -47,6 +47,7 @@ export function MapCanvas() {
       const signal = token("--color-signal", "#c4392c");
       const paper = token("--color-paper", "#f4efe4");
 
+      const roadLayer: LayerGroup = L.layerGroup().addTo(map);
       const dots: LayerGroup = L.layerGroup().addTo(map);
       let lineA: Polyline | null = null;
       let lineB: Polyline | null = null;
@@ -55,6 +56,8 @@ export function MapCanvas() {
       let driver: Marker | null = null;
       let anim = 0;
       let lastCmd = 0;
+      let lastRoadHash = "";
+
       const icon = L.divIcon({
         className: "moto-icon",
         html: MOTO_HTML,
@@ -137,8 +140,91 @@ export function MapCanvas() {
         }
       };
 
+      const syncRoadNodes = (
+        show: boolean,
+        rainActive: boolean,
+        reports: ReturnType<typeof useRapidez.getState>["roadReports"],
+      ) => {
+        const nextHash = `${show}:${rainActive}:${reports.map((r) => `${r.id}:${r.upvotes}`).join(",")}`;
+        if (nextHash === lastRoadHash) return;
+        lastRoadHash = nextHash;
+        roadLayer.clearLayers();
+        if (!show) return;
+
+        for (const node of CARORA_ROAD_NODES) {
+          if (node.kind === "rain_critical") {
+            const zone = L.circle([node.lat, node.lng], {
+              radius: node.radiusM,
+              color: rainActive ? signal : brand,
+              weight: rainActive ? 2.5 : 1.5,
+              dashArray: rainActive ? undefined : "5 5",
+              fillColor: rainActive ? signal : brand,
+              fillOpacity: rainActive ? 0.24 : 0.08,
+            }).addTo(roadLayer);
+            zone.bindTooltip(
+              `${rainActive ? "ÁREA CRÍTICA EN LLUVIA: " : "Zona de Quebrada/Drenaje: "}${node.name} — ${node.detail} (+${node.rainDelayMin} min con lluvia)`,
+              { direction: "top" },
+            );
+          } else if (node.kind === "speed_bump") {
+            const bump = L.circleMarker([node.lat, node.lng], {
+              radius: 5.5,
+              color: ink,
+              weight: 2,
+              fillColor: brand,
+              fillOpacity: 0.95,
+            }).addTo(roadLayer);
+            bump.bindTooltip(`Lombada / Reductor: ${node.name} — ${node.detail}`, {
+              direction: "top",
+            });
+          } else {
+            const traffic = L.circleMarker([node.lat, node.lng], {
+              radius: 5.5,
+              color: paper,
+              weight: 2,
+              fillColor: ink,
+              fillOpacity: 0.9,
+            }).addTo(roadLayer);
+            traffic.bindTooltip(`Tránsito en Carora: ${node.name} — ${node.detail}`, {
+              direction: "top",
+            });
+          }
+        }
+
+        for (const hs of CARORA_HOTSPOTS) {
+          const hsCircle = L.circle([hs.lat, hs.lng], {
+            radius: 135,
+            color: ink,
+            weight: 1.5,
+            dashArray: "3 4",
+            fillColor: brand,
+            fillOpacity: 0.14,
+          }).addTo(roadLayer);
+          hsCircle.bindTooltip(
+            `HOTSPOT OFICIAL (${hs.shortName}): ${hs.name} — ${hs.detail} (Meta: ${hs.targetMotos} motos)`,
+            { direction: "top" },
+          );
+        }
+
+        for (const rep of reports) {
+          const isDanger = rep.kind === "lluvia_anegado" || rep.kind === "trafico_cierre";
+          const marker = L.circleMarker([rep.lat, rep.lng], {
+            radius: 7.5,
+            color: ink,
+            weight: 2,
+            fillColor: isDanger ? signal : brand,
+            fillOpacity: 1,
+          }).addTo(roadLayer);
+          marker.bindTooltip(
+            `Reporte en vivo (${rep.sector}): ${rep.label} · por ${rep.authorName} (${rep.when}) · ${rep.upvotes} conf.`,
+            { direction: "top" },
+          );
+        }
+      };
+
       const sync = () => {
         const s = useRapidez.getState();
+        syncRoadNodes(s.showRoadLayer, s.rainActive, s.roadReports);
+
         const selecting = s.phase === "pickup" || s.phase === "destination";
         const showFleet = selecting || s.phase === "confirm" || s.phase === "searching";
         dots.clearLayers();
@@ -152,7 +238,9 @@ export function MapCanvas() {
               fillColor: d.elite ? brand : paper,
               fillOpacity: 1,
             }).addTo(dots);
-            mark.bindTooltip(`${d.name} · Catastrado${d.elite ? " · Élite" : ""}`, { direction: "top" });
+            mark.bindTooltip(`${d.name} · Catastrado${d.elite ? " · Élite" : ""}`, {
+              direction: "top",
+            });
           }
         }
 
@@ -183,7 +271,17 @@ export function MapCanvas() {
         }
 
         const quoting = s.phase === "pickup" && s.route.length > 1;
-        if (s.dest && (quoting || s.phase === "confirm" || s.phase === "riding" || s.phase === "pay" || s.phase === "done" || s.phase === "enroute" || s.phase === "arrived" || s.phase === "searching")) {
+        if (
+          s.dest &&
+          (quoting ||
+            s.phase === "confirm" ||
+            s.phase === "riding" ||
+            s.phase === "pay" ||
+            s.phase === "done" ||
+            s.phase === "enroute" ||
+            s.phase === "arrived" ||
+            s.phase === "searching")
+        ) {
           if (!destMark) {
             destMark = L.circleMarker([s.dest.lat, s.dest.lng], {
               radius: 7,
@@ -198,7 +296,13 @@ export function MapCanvas() {
           destMark = null;
         }
 
-        if (s.driverPos && (s.phase === "enroute" || s.phase === "arrived" || s.phase === "riding" || s.phase === "pay")) {
+        if (
+          s.driverPos &&
+          (s.phase === "enroute" ||
+            s.phase === "arrived" ||
+            s.phase === "riding" ||
+            s.phase === "pay")
+        ) {
           const prev = s.route[Math.max(0, s.routeIndex - 1)];
           const heading = prev ? bearing(prev, s.driverPos) : null;
           moveDriver(s.driverPos.lat, s.driverPos.lng, heading);
@@ -207,8 +311,15 @@ export function MapCanvas() {
           driver = null;
         }
 
-        if (s.phase === "enroute" || s.phase === "riding" || (s.phase === "pickup" && s.route.length > 1)) drawRoute(s.route);
-        else drawRoute([]);
+        if (
+          s.phase === "enroute" ||
+          s.phase === "riding" ||
+          (s.phase === "pickup" && s.route.length > 1)
+        ) {
+          drawRoute(s.route);
+        } else {
+          drawRoute([]);
+        }
 
         if (s.mapCmd && s.mapCmd.seq !== lastCmd) {
           lastCmd = s.mapCmd.seq;

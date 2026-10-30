@@ -1,6 +1,6 @@
 import { o as __toESM } from "../_runtime.mjs";
 import { J as require_react, n as require_react_dom } from "./@tanstack/react-router+[...].mjs";
-//#region node_modules/sonner/dist/index.mjs
+// node_modules/sonner/dist/index.mjs
 var import_react = /* @__PURE__ */ __toESM(require_react(), 1);
 var import_react_dom = /* @__PURE__ */ __toESM(require_react_dom(), 1);
 function __insertCSS(code) {
@@ -365,7 +365,7 @@ var isHttpResponse = (data) => {
 var basicToast = toastFunction;
 var getHistory = () => ToastState.toasts;
 var getToasts = () => ToastState.getActiveToasts();
-Object.assign(basicToast, {
+var toast = Object.assign(basicToast, {
 	success: ToastState.success,
 	info: ToastState.info,
 	warning: ToastState.warning,
@@ -951,5 +951,4 @@ var Toaster = /*#__PURE__*/ import_react.forwardRef(function Toaster(props, ref)
 		}));
 	}));
 });
-//#endregion
-export { Toaster as t };
+export { toast as n, Toaster as t };

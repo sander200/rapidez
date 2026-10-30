@@ -3,12 +3,23 @@ import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
-// An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
-// "unset" — otherwise production would silently run on the PGLite fallback.
-const rawDatabaseUrl =
-  typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
-const databaseUrl =
-  rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+// An empty/whitespace DATABASE_URL or unprovisioned localhost:5432 placeholder
+// must mean "unset" so the sandbox uses the embedded PGLite database.
+function resolveDatabaseUrl(): string | undefined {
+  const raw = typeof process !== "undefined" ? process.env.DATABASE_URL?.trim() : undefined;
+  if (!raw) return undefined;
+  if (
+    raw.includes("localhost:5432") ||
+    raw.includes("127.0.0.1:5432") ||
+    raw.startsWith("MY_") ||
+    raw.startsWith("YOUR_")
+  ) {
+    return undefined;
+  }
+  return raw;
+}
+
+export const databaseUrl: string | undefined = resolveDatabaseUrl();
 
 /**
  * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured

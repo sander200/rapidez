@@ -70,19 +70,22 @@ export function AuthPanel() {
 
   return (
     <div className="w-full rounded-3xl bg-sheet p-2 text-ink">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3.5">
         <img
           src="/logo.jpg"
-          alt="Rapidez Moto transporte"
-          className="size-16 rounded-2xl object-cover shadow-md"
+          alt="Rapidez Moto transporte Carora"
+          referrerPolicy="no-referrer"
+          className="size-16 shrink-0 rounded-full border-2 border-brand object-cover shadow-md"
         />
         <div>
-          <span className="inline-flex items-center gap-1 rounded-full bg-brand/25 px-2.5 py-0.5 text-xs font-bold text-ink">
-            <ShieldCheck className="size-3.5" /> Carora · Estado Lara
-          </span>
-          <p className="mt-0.5 font-display text-2xl font-extrabold tracking-wide">RAPIDEZ MOTO</p>
+          <p className="inline-flex items-center gap-1 text-xs font-bold text-muted">
+            <ShieldCheck className="size-3.5 text-brand" /> Carora · Estado Lara
+          </p>
+          <p className="mt-0.5 font-display text-2xl font-extrabold tracking-wide">
+            Rapidez · Moto transporte
+          </p>
           <p className="text-xs text-muted">
-            Transporte real verificado · Selfie y documentos obligatorios
+            Selfie y documentos obligatorios · Mapa vial de lombadas y lluvia en vivo
           </p>
         </div>
       </div>

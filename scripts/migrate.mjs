@@ -43,7 +43,22 @@ async function main() {
   }
 
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    await pool.end().catch(() => {});
+    if (
+      err?.code === "ECONNREFUSED" &&
+      (databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost"))
+    ) {
+      console.log(
+        "[migrate] local Postgres not running — skipping (the PGLite fallback migrates itself at runtime).",
+      );
+      return;
+    }
+    throw err;
+  }
   try {
     await client.query(
       "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",

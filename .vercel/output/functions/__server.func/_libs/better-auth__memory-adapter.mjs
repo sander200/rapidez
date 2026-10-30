@@ -1,6 +1,6 @@
 import { r as __exportAll } from "../_runtime.mjs";
-import { Rt as createAdapterFactory, cn as logger } from "./@better-auth/core+[...].mjs";
-//#region node_modules/@better-auth/memory-adapter/dist/index.mjs
+import { Rt as createAdapterFactory, un as logger } from "./@better-auth/core+[...].mjs";
+// node_modules/@better-auth/memory-adapter/dist/index.mjs
 var dist_exports = /* @__PURE__ */ __exportAll({ memoryAdapter: () => memoryAdapter });
 /**
 * Case-insensitive in-memory comparison helpers.
@@ -340,5 +340,4 @@ var memoryAdapter = (db, config) => {
 		return adapterCreator(options);
 	};
 };
-//#endregion
 export { dist_exports as t };
